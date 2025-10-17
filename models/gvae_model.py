@@ -4,7 +4,7 @@ from torch_geometric.data import HeteroData
 from typing import Dict, Any
 
 from .gvae_components import (
-    ViewEncoder, StructureDecoder, AttributeDecoder, MHA_CLSToken_FusionLayer,
+    ViewEncoder, StructureDecoder, AttributeDecoder, FusionAndClassifierHead,
     ClassifierMLP, ProjectionHead, RadiologyLesionAttentionAggregator
 )
 
@@ -67,18 +67,27 @@ class GVAE (nn.Module):
                 self.missing_embeddings_params[view] = nn.Parameter(
                     torch.randn(1, d_embed))
 
-        self.fusion_layer = MHA_CLSToken_FusionLayer(
-            embed_dim=d_embed,  # The dimension of your view embeddings
+        # self.fusion_layer = MHA_CLSToken_FusionLayer(
+        #     embed_dim=d_embed,  # The dimension of your view embeddings
+        #     num_heads=fusion_config.get('num_fusion_heads', 4),
+        #     ffn_dim_multiplier=fusion_config.get('fusion_ffn_multiplier', 2),
+        #     dropout=fusion_config.get('dropout_fusion', 0.1),
+        #     output_dim=fusion_config.get('fused_dim', d_embed)
+        # )
+
+        # self.classifier = ClassifierMLP(
+        #     input_dim=fusion_config.get('fused_dim', d_embed),
+        #     hidden_dim=classifier_config['hidden_dim_classifier'],
+        #     output_dim=1, dropout=classifier_config.get('dropout_class', 0.5)
+        # )
+
+        self.fusion_and_classifier_head = FusionAndClassifierHead(
+            embed_dim=d_embed,
             num_heads=fusion_config.get('num_fusion_heads', 4),
             ffn_dim_multiplier=fusion_config.get('fusion_ffn_multiplier', 2),
-            dropout=fusion_config.get('dropout_fusion', 0.1),
-            output_dim=fusion_config.get('fused_dim', d_embed)
-        )
-
-        self.classifier = ClassifierMLP(
-            input_dim=fusion_config.get('fused_dim', d_embed),
-            hidden_dim=classifier_config['hidden_dim_classifier'],
-            output_dim=1, dropout=classifier_config.get('dropout_class', 0.5)
+            fusion_dropout=fusion_config.get('dropout_fusion', 0.1),
+            classifier_hidden_dim=classifier_config['hidden_dim_classifier'],
+            classifier_dropout=classifier_config.get('dropout_class', 0.5)
         )
 
     def reparameterize(self, mu, logvar):
@@ -201,8 +210,7 @@ class GVAE (nn.Module):
             return torch.empty(0, 1, device=device), vae_outputs_for_loss, {}, None
 
         batch_fusion_input_tensor = torch.stack(batch_fusion_input_list)
-        z_fused, fusion_attention = self.fusion_layer(batch_fusion_input_tensor)
-        logits = self.classifier(z_fused)
+        logits, fusion_attention = self.fusion_and_classifier_head(batch_fusion_input_tensor)
 
         # --- FORMAT OUTPUT FOR CONTRASTIVE LOSS ---
         mus_projected_for_cl_formatted = {}
@@ -220,38 +228,3 @@ class GVAE (nn.Module):
 
         return logits, vae_outputs_for_loss, final_mus_projected_for_cl, fusion_attention
     
-    @torch.no_grad()
-    def get_mu_fused(self, full_data: HeteroData, indices: torch.Tensor) -> torch.Tensor:
-        """
-        Extracts and fuses the mu vectors for the specified patient indices.
-        Fusion is done by averaging the mu vectors from all available views for each patient.
-        """
-        self.eval()
-        device = indices.device
-
-        # Get VAE outputs for the requested indices
-        _, vae_outputs, _, _ = self.forward(full_data, indices)
-
-        # Create a mapping from global index to local (0-based) index within this batch
-        global_to_local_map = {global_idx.item(): i for i, global_idx in enumerate(indices)}
-
-        fused_mus = torch.zeros(len(indices), self.d_embed, device=device)
-        counts = torch.zeros(len(indices), 1, device=device)
-
-        for view in self.views:
-            # Find which of the requested indices actually have this view
-            _, _, _, global_indices_with_view = get_view_subgraph_and_features(full_data, view, indices)
-            
-            if global_indices_with_view.numel() > 0 and vae_outputs[view].get('mu') is not None:
-                # Map the global indices that have the view to their local indices in the output tensor
-                local_indices_to_update = torch.tensor([
-                    global_to_local_map[g_idx.item()] for g_idx in global_indices_with_view
-                ], device=device)
-
-                mus_for_view = vae_outputs[view]['mu']
-                fused_mus.index_add_(0, local_indices_to_update, mus_for_view)
-                counts.index_add_(0, local_indices_to_update, torch.ones(len(local_indices_to_update), 1, device=device))
-
-        counts[counts == 0] = 1 # Avoid division by zero
-        fused_mus /= counts
-        return fused_mus

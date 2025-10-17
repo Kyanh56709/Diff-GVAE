@@ -310,6 +310,80 @@ class ProjectionHead(nn.Module):
         return F.normalize(projected_x, p=2, dim=-1)
     
 
+class FusionAndClassifierHead(nn.Module):
+    """
+    Fuses view embeddings (z_sampled) using a learnable [CLS] token, MHA,
+    and then immediately classifies the resulting fused representation.
+    """
+    def __init__(self, embed_dim: int, num_heads: int,
+                 classifier_hidden_dim: int,
+                 ffn_dim_multiplier: int = 2,
+                 fusion_dropout: float = 0.1,
+                 classifier_dropout: float = 0.5):
+        """
+        Args:
+            embed_dim: Dimensionality of the input view embeddings (z_sampled).
+            num_heads: Number of attention heads for fusion.
+            classifier_hidden_dim: Hidden dimension for the final classifier MLP.
+            ffn_dim_multiplier: Multiplier for the feed-forward layer's hidden dim in the transformer block.
+            fusion_dropout: Dropout for the fusion part (MHA, FFN).
+            classifier_dropout: Dropout for the classifier part.
+        """
+        super().__init__()
+
+        # --- Phần Fusion (Transformer Block) ---
+        self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim))
+        self.mha = nn.MultiheadAttention(
+            embed_dim=embed_dim, num_heads=num_heads, dropout=fusion_dropout, batch_first=True
+        )
+        self.ffn = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim * ffn_dim_multiplier),
+            nn.GELU(),
+            nn.Dropout(fusion_dropout),
+            nn.Linear(embed_dim * ffn_dim_multiplier, embed_dim)
+        )
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim)
+
+        # --- Phần Classifier (MLP Head) ---
+        self.classifier_head = nn.Sequential(
+            nn.LayerNorm(embed_dim), # Thêm một LayerNorm để ổn định đầu vào cho classifier
+            nn.Linear(embed_dim, classifier_hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(p=classifier_dropout),
+            nn.Linear(classifier_hidden_dim, 1) # Output là 1 logit duy nhất
+        )
+
+    def forward(self, view_embeddings_stacked: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+        Args:
+            view_embeddings_stacked: Tensor of z_sampled from different views,
+                                     shape [batch_size, num_views, embed_dim].
+        
+        Returns:
+            logits: The final classification logits, shape [batch_size, 1].
+            attention_weights: None.
+        """
+        batch_size = view_embeddings_stacked.shape[0]
+
+        # --- 1. Fusion using Transformer Block ---
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+        x = torch.cat((cls_tokens, view_embeddings_stacked), dim=1)
+
+        attn_output, _ = self.mha(x, x, x)
+        x = self.norm1(x + attn_output)
+        
+        ffn_output = self.ffn(x)
+        x = self.norm2(x + ffn_output)
+        
+        # Lấy biểu diễn tổng hợp từ [CLS] token
+        cls_output = x[:, 0, :] # Shape: [batch_size, embed_dim]
+
+        # --- 2. Classification ---
+        logits = self.classifier_head(cls_output)
+
+        return logits, None
+
 class RadiologyLesionAttentionAggregator(nn.Module):
     def __init__(self, lesion_feature_dim: int, patient_embed_dim: int,
                  attention_hidden_dim: Optional[int] = None, dropout: float = 0.1):
