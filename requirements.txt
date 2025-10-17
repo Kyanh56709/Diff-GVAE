@@ -1,0 +1,10 @@
+torch
+torch_geometric
+torch_scatter
+scikit-learn
+numpy
+pandas
+tqdm
+matplotlib
+wandb
+einops
