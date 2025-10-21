@@ -14,6 +14,7 @@ from models.gvae_components import MuFusionTransformer
 from utils.data_utils import get_view_subgraph_and_features
 from typing import Tuple
 from tqdm import tqdm
+#from utils.data_utils import preprocess_data_with_pca
 
 @torch.no_grad()
 def get_all_view_mus_from_gvae(
@@ -70,35 +71,28 @@ def kfold_gvae_ddpm_generative_classifier(
     full_data: torch.utils.data.Dataset,
     model_config: Dict[str, Any],
     train_config: Dict[str, Any],
-    ddpm_config: Dict[str, Any]
+    ddpm_config: Dict[str, Any],
+    pca_config: Dict[str, int]
 ) -> Dict[str, float]:
-    """
-    Performs K-Fold CV for the entire GVAE + DDPM generative classifier pipeline.
-
-    For each fold, it:
-    1. Trains a GVAE model on the training data.
-    2. Extracts latent vectors (mu) from the trained GVAE.
-    3. Trains two separate unconditional DDPMs: one for responders, one for non-responders.
-    4. Evaluates on the validation set by comparing the likelihood of a patient's latent
-       vector under both DDPMs.
-    5. Aggregates metrics across all folds for a final robust evaluation.
-
-    Returns:
-        Dict[str, float]: A dictionary containing the final aggregated performance metrics.
-    """
     device = train_config['device']
     print(f"Using device: {device}")
-    kf = KFold(n_splits=train_config['n_splits'], shuffle=True, random_state=train_config.get('random_seed', 42))
-    
+
+    # # === Step 0: Preprocess data with PCA on CPU ===
+    # data_cpu = full_data.cpu()
+    # data_pca = preprocess_data_with_pca(data_cpu, pca_config)
+        
     # Tạo một bản sao của dữ liệu trên CPU để thực hiện PCA
     full_data_cpu = full_data.clone().cpu()
+
+    # # Cập nhật lại model_config với kích thước mới sau PCA
+    # model_config['view_configs']['clinical']['in_channels'] = pca_config['clinical']
+    # model_config['view_configs']['pathology']['in_channels'] = pca_config['pathology']
+    # model_config['radiology_aggregator_config']['lesion_feature_dim'] = pca_config['radiology_lesion']
+    
+    kf = KFold(n_splits=train_config['n_splits'], shuffle=True, random_state=train_config.get('random_seed', 42))
     
     all_true_labels, all_pred_probs = [], []
-    fold_aucs: List[float] = []
-    fold_f1s: List[float] = []
-    fold_accuracies: List[float] = []
-    fold_precisions: List[float] = []
-    fold_recalls: List[float] = []
+    fold_aucs, fold_f1s, fold_accuracies, fold_precisions, fold_recalls = [], [], [], [], []
 
     for fold, (train_idx_np, val_idx_np) in enumerate(kf.split(np.arange(full_data_cpu['patient'].num_nodes))):
         fold_num = fold + 1
@@ -106,36 +100,28 @@ def kfold_gvae_ddpm_generative_classifier(
         train_indices = torch.from_numpy(train_idx_np).to(device)
         val_indices = torch.from_numpy(val_idx_np).to(device)
 
-        # === Step 1: Train GVAE for this Fold ===
+        # === Step 1: Train GVAE for this Fold on PCA data ===
         print(f"--- [Fold {fold_num}] Training GVAE model ---")
         best_gvae_state = train_gvae_single_fold(full_data, train_indices, val_indices, model_config, train_config, fold_num)
 
         if best_gvae_state is None:
-            print(f"WARNING: GVAE training failed for fold {fold_num}. Skipping this fold.")
+            print(f"WARNING: GVAE training failed for fold {fold_num}. Skipping.")
             continue
 
-        # === Step 2: Load Best GVAE and Extract View-Specific Mus ===
+        # === Step 2: Load Best GVAE and Train Fusion Layer ===
         gvae_fold_model = GVAE(**model_config).to(device)
         gvae_fold_model.load_state_dict(best_gvae_state)
         
-        print(f"--- [Fold {fold_num}] Extracting view-specific mu vectors from training set ---")
+        print(f"--- [Fold {fold_num}] Extracting mu vectors & Training Fusion Layer ---")
         stacked_mus_train, train_labels = get_all_view_mus_from_gvae(gvae_fold_model, full_data, train_indices)
 
-        # === Step 2.5: Train the MuFusionTransformer ===
-        print(f"--- [Fold {fold_num}] Training MuFusionTransformer ---")
-        fusion_transformer = MuFusionTransformer(
-            d_embed=model_config['d_embed'],
-            n_heads=8,
-            dim_feedforward=model_config['d_embed'] * 4
-        ).to(device)
-        
-        # Một classifier tạm thời để hướng dẫn việc học của fusion layer
+        fusion_transformer = MuFusionTransformer(d_embed=model_config['d_embed'], n_heads=8, dim_feedforward=model_config['d_embed'] * 4).to(device)
         temp_classifier = torch.nn.Linear(model_config['d_embed'], 1).to(device)
-        fusion_params = list(fusion_transformer.parameters()) + list(temp_classifier.parameters())
-        fusion_optimizer = torch.optim.AdamW(fusion_params, lr=1e-3, weight_decay=1e-4)
+        fusion_optimizer = torch.optim.AdamW(list(fusion_transformer.parameters()) + list(temp_classifier.parameters()), lr=1e-3)
         bce_loss = torch.nn.BCEWithLogitsLoss()
 
-        for _ in tqdm(range(200), desc="Training Fusion Layer"): # Huấn luyện 100 epochs
+        
+        for _ in tqdm(range(200), desc="Training Fusion Layer", leave=False):
             fusion_transformer.train()
             fusion_optimizer.zero_grad()
             mu_fused = fusion_transformer(stacked_mus_train)
@@ -144,7 +130,7 @@ def kfold_gvae_ddpm_generative_classifier(
             loss.backward()
             fusion_optimizer.step()
         
-        # === Step 3: Generate Intelligently Fused Latents and Train DDPMs ===
+        # === Step 3: Generate Fused Latents and Train DDPMs ===
         print(f"--- [Fold {fold_num}] Generating fused latents and training DDPMs ---")
         fusion_transformer.eval()
         with torch.no_grad():
@@ -157,94 +143,63 @@ def kfold_gvae_ddpm_generative_classifier(
         ddpm_non_responder, scaler_non_resp = train_single_unconditional_ddpm(mus_non_responder, ddpm_config, device)
 
         if ddpm_responder is None or ddpm_non_responder is None:
-            print(f"WARNING: DDPM training failed for fold {fold_num}. Skipping this fold.")
+            print(f"WARNING: DDPM training failed. Skipping fold.")
             continue
             
-        # === Step 4: Evaluate on the Validation Set ===
-        print(f"--- [Fold {fold_num}] Evaluating on validation set ({len(val_indices)} samples) ---")
+        # === Step 4: Evaluate on the Validation Set (STABLE EVALUATION) ===
+        print(f"--- [Fold {fold_num}] Evaluating on validation set ---")
         stacked_mus_val, val_labels = get_all_view_mus_from_gvae(gvae_fold_model, full_data, val_indices)
         
         with torch.no_grad():
             final_val_mus = fusion_transformer(stacked_mus_val)
             
-        # Scale validation latents using the scalers fitted on the respective training subsets
         val_mus_scaled_for_resp = torch.tensor(scaler_resp.transform(final_val_mus.cpu().numpy()), dtype=torch.float32).to(device)
         val_mus_scaled_for_non_resp = torch.tensor(scaler_non_resp.transform(final_val_mus.cpu().numpy()), dtype=torch.float32).to(device)
         
         fold_probs = []
-        ddpm_responder.eval()
-        ddpm_non_responder.eval()
+        timesteps_to_eval = torch.linspace(0, ddpm_config['timesteps'] - 1, 50, dtype=torch.long).to(device)
+        
         with torch.no_grad():
-            for i in range(len(final_val_mus)):
-                loss_resp = ddpm_responder.loss(val_mus_scaled_for_resp[i].unsqueeze(0))
-                loss_non_resp = ddpm_non_responder.loss(val_mus_scaled_for_non_resp[i].unsqueeze(0))
-
-                epsilon = 1e-9
-                likelihood_resp = 1 / (loss_resp + epsilon)
-                likelihood_non_resp = 1 / (loss_non_resp + epsilon)
+            for i in tqdm(range(len(final_val_mus)), desc="Evaluating", leave=False):
+                loss_resp = ddpm_responder.evaluation_loss(val_mus_scaled_for_resp[i].unsqueeze(0), timesteps_to_eval)
+                loss_non_resp = ddpm_non_responder.evaluation_loss(val_mus_scaled_for_non_resp[i].unsqueeze(0), timesteps_to_eval)
                 
+                likelihood_resp = 1 / (loss_resp + 1e-9)
+                likelihood_non_resp = 1 / (loss_non_resp + 1e-9)
                 prob_is_responder = likelihood_resp / (likelihood_resp + likelihood_non_resp)
                 fold_probs.append(prob_is_responder.item())
         
-        all_true_labels.extend(val_labels.cpu().numpy())
-        all_pred_probs.extend(fold_probs)
-
+        # --- Store results for this fold ---
         fold_labels = val_labels.cpu().numpy()
-        fold_auc = roc_auc_score(fold_labels, fold_probs)
-        fold_aucs.append(fold_auc)
-        print(f"  [Fold {fold_num}] AUC: {fold_auc:.4f}")
         fold_preds_binary = (np.array(fold_probs) > 0.5).astype(int)
-        fold_f1 = f1_score(fold_labels, fold_preds_binary, zero_division=0)
-        fold_f1s.append(fold_f1)
-        print(f"  [Fold {fold_num}] F1 Score: {fold_f1:.4f}")
-        fold_accuracy = accuracy_score(fold_labels, fold_preds_binary)
-        fold_accuracies.append(fold_accuracy)
-        print(f"  [Fold {fold_num}] Accuracy: {fold_accuracy:.4f}")
-        fold_precision = precision_score(fold_labels, fold_preds_binary, zero_division=0)
-        fold_precisions.append(fold_precision)
-        fold_recall = recall_score(fold_labels, fold_preds_binary, zero_division=0)
-        fold_recalls.append(fold_recall)
-        print(f"  [Fold {fold_num}] Precision: {fold_precision:.4f}")
-        print(f"  [Fold {fold_num}] Recall: {fold_recall:.4f}")
         
+        fold_aucs.append(roc_auc_score(fold_labels, fold_probs))
+        fold_f1s.append(f1_score(fold_labels, fold_preds_binary, zero_division=0))
+        fold_accuracies.append(accuracy_score(fold_labels, fold_preds_binary))
+        fold_precisions.append(precision_score(fold_labels, fold_preds_binary, zero_division=0))
+        fold_recalls.append(recall_score(fold_labels, fold_preds_binary, zero_division=0))
+        
+        print(f"  [Fold {fold_num}] AUC: {fold_aucs[-1]:.4f}, F1: {fold_f1s[-1]:.4f}")
 
         all_true_labels.extend(fold_labels)
         all_pred_probs.extend(fold_probs)
 
     # === Step 5: Aggregate and Report Final Metrics ===
-    # (Không có thay đổi ở đây)
     print(f"\n{'='*20} FINAL PIPELINE RESULTS {'='*20}")
     if not all_true_labels:
-        print("No results to report. Training may have failed.")
+        print("No results to report.")
         return {}
 
-    final_auc = roc_auc_score(all_true_labels, all_pred_probs)
-    final_preds_binary = (np.array(all_pred_probs) > 0.5).astype(int)
-    auc_std = np.std(fold_aucs)
-    final_f1 = f1_score(all_true_labels, final_preds_binary, zero_division=0)
-    final_accuracy = accuracy_score(all_true_labels, final_preds_binary)
-    final_precision = precision_score(all_true_labels, final_preds_binary, zero_division=0)
-    final_recall = recall_score(all_true_labels, final_preds_binary, zero_division=0)
-    f1_std = np.std(fold_f1s)
-    accuracy_std = np.std(fold_accuracies)
-    precision_std = np.std(fold_precisions)
-    recall_std = np.std(fold_recalls)
-
     results = {
-        'auc': final_auc,
-        'auc_std': auc_std,
-        'f1': final_f1,
-        'f1_std': f1_std,
-        'accuracy': final_accuracy,
-        'accuracy_std': accuracy_std,
-        'precision': final_precision,
-        'precision_std': precision_std,
-        'recall': final_recall,
-        'recall_std': recall_std
+        'mean_auc': np.mean(fold_aucs), 'std_auc': np.std(fold_aucs),
+        'mean_f1': np.mean(fold_f1s), 'std_f1': np.std(fold_f1s),
+        'mean_accuracy': np.mean(fold_accuracies), 'std_accuracy': np.std(fold_accuracies),
+        'mean_precision': np.mean(fold_precisions), 'std_precision': np.std(fold_precisions),
+        'mean_recall': np.mean(fold_recalls), 'std_recall': np.std(fold_recalls),
     }
 
     print("--- Cross-Validation Summary (PCA-GVAE + Generative DDPM Classifier) ---")
     for key, value in results.items():
-        print(f"  Overall {key.capitalize()}: {value:.4f}")
+        print(f"  {key.replace('_', ' ').capitalize()}: {value:.4f}")
 
     return results

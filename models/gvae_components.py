@@ -382,7 +382,7 @@ class FusionAndClassifierHead(nn.Module):
         # --- 2. Classification ---
         logits = self.classifier_head(cls_output)
 
-        return logits, None
+        return logits, cls_output
 
 class RadiologyLesionAttentionAggregator(nn.Module):
     def __init__(self, lesion_feature_dim: int, patient_embed_dim: int,
