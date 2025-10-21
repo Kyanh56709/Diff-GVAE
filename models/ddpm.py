@@ -308,3 +308,18 @@ class UnconditionalDDPM(nn.Module):
                 x = posterior_mean + torch.sqrt(posterior_variance_t) * noise
                 
         return x
+    
+    @torch.no_grad()
+    def evaluation_loss(self, x0: torch.Tensor, timesteps_to_eval: torch.Tensor) -> torch.Tensor:
+        """
+        Calculates a stable, deterministic loss for evaluation purposes.
+        Averages the MSE loss across a specified set of timesteps.
+        """
+        total_loss = 0
+        for t in timesteps_to_eval:
+            t_batch = torch.full((x0.shape[0],), t, device=x0.device, dtype=torch.long)
+            xt, noise = self.forward_process(x0, t_batch)
+            predicted_noise = self.denoise_fn(xt, t_batch, y=None)
+            total_loss += F.mse_loss(predicted_noise, noise)
+        
+        return total_loss / len(timesteps_to_eval)
