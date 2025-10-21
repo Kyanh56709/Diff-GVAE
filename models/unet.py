@@ -22,11 +22,26 @@ class SinusoidalPositionEmbeddings(nn.Module):
         return embeddings
 
 class ResnetBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, *, time_emb_dim=None):
+    def __init__(self, in_channels, out_channels, *, time_emb_dim=None, dropout_prob: float = 0.0):
         super().__init__()
-        self.mlp = nn.Sequential(nn.SiLU(), nn.Linear(time_emb_dim, out_channels)) if time_emb_dim is not None else None
-        self.block1 = nn.Sequential(nn.GroupNorm(8, in_channels), nn.SiLU(), nn.Linear(in_channels, out_channels))
-        self.block2 = nn.Sequential(nn.GroupNorm(8, out_channels), nn.SiLU(), nn.Linear(out_channels, out_channels))
+        self.mlp = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(time_emb_dim, out_channels)
+        ) if time_emb_dim is not None else None
+
+        self.block1 = nn.Sequential(
+            nn.GroupNorm(8, in_channels),
+            nn.SiLU(),
+            nn.Linear(in_channels, out_channels)
+        )
+
+        self.block2 = nn.Sequential(
+            nn.GroupNorm(8, out_channels),
+            nn.SiLU(),
+            nn.Dropout(dropout_prob),  
+            nn.Linear(out_channels, out_channels)
+        )
+
         self.res_conv = nn.Linear(in_channels, out_channels) if in_channels != out_channels else nn.Identity()
 
     def forward(self, x, t_emb):
@@ -63,14 +78,31 @@ class Attention(nn.Module):
 # --- The Main U-Net Denoising Network (PHIÊN BẢN ĐÃ SỬA LỖI) ---
 
 class DenoiseUNet(nn.Module):
+    """
+    A U-Net architecture adapted for 1D vector data (latent vectors), used as the
+    denoising function in a Denoising Diffusion Probabilistic Model (DDPM).
+
+    This model can be conditional (on class labels `y`) or unconditional.
+    """
     def __init__(self,
                  latent_dim: int,
                  num_classes: Optional[int] = None,
-                 dim_mults: Tuple[int, ...] = (1, 2, 4, 8)):
+                 dim_mults: Tuple[int, ...] = (1, 2, 4, 8),
+                 dropout_prob: float = 0.5):
+        """
+        Args:
+            latent_dim (int): The dimensionality of the input latent vectors.
+            num_classes (Optional[int]): The number of classes for conditional generation.
+                                         If None, the model is unconditional. `0` is reserved
+                                         for the unconditional token in classifier-free guidance.
+            dim_mults (Tuple[int, ...]): Multipliers for the latent_dim to define the
+                                         channel dimensions at each U-Net level.
+        """
         super().__init__()
         
         self.latent_dim = latent_dim
         self.is_conditional = num_classes is not None
+        self.dropout_prob = dropout_prob
         
         # --- Time and Condition Embeddings ---
         time_dim = latent_dim * 4
@@ -82,6 +114,7 @@ class DenoiseUNet(nn.Module):
         )
 
         if self.is_conditional:
+            # num_classes should include the unconditional token `0`
             self.class_emb = nn.Embedding(num_classes, time_dim)
 
         # --- U-Net Architecture ---
@@ -91,78 +124,92 @@ class DenoiseUNet(nn.Module):
         self.init_conv = nn.Linear(latent_dim, dims[0])
         
         # -- Downsampling Path --
-        self.down_blocks = nn.ModuleList([])
-        for in_c, out_c in in_out:
-            self.down_blocks.append(nn.ModuleList([
-                ResnetBlock(in_c, out_c, time_emb_dim=time_dim),
-                Attention(out_c)
-            ]))
+        self.down_blocks = nn.ModuleList([
+            nn.ModuleList([
+                ResnetBlock(dim_in, dim_out, time_emb_dim=time_dim, dropout_prob=dropout_prob),
+                Attention(dim_out)
+            ]) for dim_in, dim_out in in_out
+        ])
 
         # -- Bottleneck --
         mid_dim = dims[-1]
-        self.mid_block1 = ResnetBlock(mid_dim, mid_dim, time_emb_dim=time_dim)
+        self.mid_block1 = ResnetBlock(mid_dim, mid_dim, time_emb_dim=time_dim, dropout_prob=dropout_prob)
         self.mid_attn = Attention(mid_dim)
-        self.mid_block2 = ResnetBlock(mid_dim, mid_dim, time_emb_dim=time_dim)
+        self.mid_block2 = ResnetBlock(mid_dim, mid_dim, time_emb_dim=time_dim, dropout_prob=dropout_prob)
 
-        # -- Upsampling Path --
-        self.up_blocks = nn.ModuleList([])
-        for in_c, out_c in reversed(in_out):
-            # in_c: dimension of the output of this block (e.g., 128)
-            # out_c: dimension of the input from below and of the skip connection (e.g., 256)
-            self.up_blocks.append(nn.ModuleList([
-                # Input is doubled: from below (out_c) + skip connection (out_c)
-                ResnetBlock(out_c * 2, in_c, time_emb_dim=time_dim),
-                Attention(in_c)
-            ]))
-
-        # =================== FIX STARTS HERE (1/2) ===================
-        # Tách ResnetBlock ra khỏi nn.Sequential
-        self.final_res_block = ResnetBlock(dims[0], dims[0], time_emb_dim=time_dim)
-        self.final_linear = nn.Linear(dims[0], latent_dim)
-        # ===================  FIX ENDS HERE (1/2)  ===================
+        # --- Up blocks ---
+        self.up_blocks = nn.ModuleList([
+            nn.ModuleList([
+                ResnetBlock(dim_out * 2, dim_in, time_emb_dim=time_dim, dropout_prob=dropout_prob),
+                Attention(dim_in)
+            ]) for dim_in, dim_out in reversed(in_out)
+        ])
+        
         
         # -- Final Block --
-        self.final_conv = nn.Sequential(
-            ResnetBlock(dims[0], dims[0], time_emb_dim=time_dim),
-            nn.Linear(dims[0], latent_dim)
-        )
+        # Takes the output from the last up-block (dims[0]) and the initial skip connection (dims[0])
+        self.final_res_block = ResnetBlock(dims[0] * 2, dims[0], time_emb_dim=time_dim, dropout_prob=dropout_prob)
+        self.final_linear = nn.Linear(dims[0], latent_dim)
         
-    def forward(self, x: torch.Tensor, time: torch.Tensor, y: Optional[torch.Tensor] = None):
+        # Optional classifier-free guidance dropout
+        self.cond_drop_prob = 0.1
+        
+    def forward(self, x: torch.Tensor, time: torch.Tensor, y: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Forward pass for the denoising U-Net.
+
+        Args:
+            x (torch.Tensor): The noisy input latent vector of shape [batch_size, latent_dim].
+            time (torch.Tensor): The timestep for each sample in the batch, shape [batch_size].
+            y (Optional[torch.Tensor]): The class labels for conditional generation, shape [batch_size].
+
+        Returns:
+            torch.Tensor: The predicted noise, of the same shape as x.
+        """
         if self.is_conditional and y is None:
             raise ValueError("Class labels `y` must be provided for a conditional model.")
 
+        # 1. Initial convolution and save for final skip connection
         x = self.init_conv(x)
+        initial_skip = x.clone()
 
+        # 2. Get time and class embeddings
         t_emb = self.time_mlp(time)
         if self.is_conditional:
+            # During training, apply classifier-free guidance dropout
             if self.training and hasattr(self, 'cond_drop_prob') and self.cond_drop_prob > 0:
                  mask = torch.rand(y.shape[0], device=y.device) < self.cond_drop_prob
-                 y[mask] = 0 # 0 is the index for the null/unconditional token
+                 # Set masked labels to 0, the index for the unconditional token
+                 y[mask] = 0 
             t_emb = t_emb + self.class_emb(y)
 
-        # Down path
+        # 3. Downsampling path
         skip_connections = []
-        for res, attn in self.down_blocks:
-            x = res(x, t_emb)
-            x = attn(x)
+        for res_block, attn_block in self.down_blocks:
+            x = res_block(x, t_emb)
+            x = attn_block(x)
             skip_connections.append(x)
         
-        # Bottleneck
+        # 4. Bottleneck
         x = self.mid_block1(x, t_emb)
         x = self.mid_attn(x)
         x = self.mid_block2(x, t_emb)
         
-        # Up path
-        for res, attn in self.up_blocks:
+        # 5. Upsampling path
+        for res_block, attn_block in self.up_blocks:
+            # Pop the corresponding skip connection from the down path
             skip = skip_connections.pop()
-            x = torch.cat((x, skip), dim=1) # Concatenate along channel dimension
-            x = res(x, t_emb)
-            x = attn(x)
+            # Concatenate along the feature dimension
+            x = torch.cat((x, skip), dim=1) 
+            x = res_block(x, t_emb)
+            x = attn_block(x)
 
-        # Final
-        # =================== FIX STARTS HERE (2/2) ===================
-        # Gọi ResnetBlock một cách tường minh và truyền vào t_emb
+        # 6. Final block
+        # Concatenate with the very first skip connection
+        x = torch.cat((x, initial_skip), dim=1)
+        
+        # Explicitly call the final ResnetBlock with the time embedding
         x = self.final_res_block(x, t_emb)
-        # Sau đó mới đưa qua lớp Linear cuối cùng
+        
+        # Final projection to the original latent dimension
         return self.final_linear(x)
-        # ===================  FIX ENDS HERE (2/2)  ===================

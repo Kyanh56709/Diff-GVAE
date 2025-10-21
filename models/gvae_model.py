@@ -5,7 +5,7 @@ from typing import Dict, Any
 
 from .gvae_components import (
     ViewEncoder, StructureDecoder, AttributeDecoder, FusionAndClassifierHead,
-    ClassifierMLP, ProjectionHead, RadiologyLesionAttentionAggregator
+    ProjectionHead, RadiologyLesionAttentionAggregator
 )
 
 from utils.data_utils import get_view_subgraph_and_features, get_dense_adj_for_reconstruction
@@ -42,8 +42,14 @@ class GVAE (nn.Module):
         self.vae_encoders = nn.ModuleDict()
         self.structure_decoders = nn.ModuleDict()
         self.attribute_decoders = nn.ModuleDict()
-        if self.missing_strategy == 'learnable':
+        # if self.missing_strategy == 'learnable':
+        #     self.missing_embeddings_params = nn.ParameterDict()
+        if self.missing_strategy in ('learnable', 'zero'):
             self.missing_embeddings_params = nn.ParameterDict()
+            if self.missing_strategy == 'zero':
+                # create a non-learnable zero embedding per view (will be overwritten for 'learnable')
+                for v in self.views:
+                    self.missing_embeddings_params[v] = nn.Parameter(torch.zeros(1, d_embed), requires_grad=False)
 
         self.projection_heads = nn.ModuleDict()
 
@@ -66,6 +72,8 @@ class GVAE (nn.Module):
             if self.missing_strategy == 'learnable':
                 self.missing_embeddings_params[view] = nn.Parameter(
                     torch.randn(1, d_embed))
+                
+
 
         # self.fusion_layer = MHA_CLSToken_FusionLayer(
         #     embed_dim=d_embed,  # The dimension of your view embeddings
@@ -121,11 +129,10 @@ class GVAE (nn.Module):
             x_for_vae_encoder, original_x_for_vae_reconstruction = None, None
             
             if view == 'radiology' and self.radiology_lesion_aggregator:
-                # =================== FIX STARTS HERE ===================
-                # FIX: Chuyển các tensor từ full_data lên đúng device trước khi sử dụng
+
                 patient_lesion_edges_all = full_data['patient', 'has_lesion', 'lesion'].edge_index.to(device)
                 all_lesion_features_all = full_data['lesion'].x.to(device)
-                # ===================  FIX ENDS HERE  ===================
+                
 
                 active_patient_global_to_local_map = {glob_idx.item(): i for i, glob_idx in enumerate(global_indices_subset_patients.cpu())}
                 
