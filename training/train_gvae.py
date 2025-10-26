@@ -104,9 +104,6 @@ def kfold_train_gvae(
                     new_patient_features[feature_key] = torch.tensor(
                         original_features, dtype=torch.float32)
 
-        # 3. Perform Lesion-Level PCA
-        # ============================= FIX 1 START =============================
-        # The logic here is fixed to correctly detect lesion features and apply PCA robustly.
         lesion_pca_config = train_config.get('lesion_pca_config')
         print("  Processing lesion-level features...")
 
@@ -157,7 +154,6 @@ def kfold_train_gvae(
             )
         else:
             print("    - Skipping: 'lesion' node type or 'x' features not found.")
-        # ============================== FIX 1 END ==============================
 
         # 4. Construct the new HeteroData object for this fold
         print("  Constructing new HeteroData object for the fold...")

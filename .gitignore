@@ -38,6 +38,7 @@ ENV/
 # Model weights and data
 *.pth
 
+data/
 
 
 # Logs
