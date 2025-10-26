@@ -93,9 +93,9 @@ class GVAE (nn.Module):
             embed_dim=d_embed,
             num_heads=fusion_config.get('num_fusion_heads', 4),
             ffn_dim_multiplier=fusion_config.get('fusion_ffn_multiplier', 2),
-            fusion_dropout=fusion_config.get('dropout_fusion', 0.1),
-            classifier_hidden_dim=classifier_config['hidden_dim_classifier'],
-            classifier_dropout=classifier_config.get('dropout_class', 0.5)
+            fusion_dropout=fusion_config.get('fusion_dropout', 0.1),
+            classifier_hidden_dim=classifier_config['classifier_hidden_dim'],
+            classifier_dropout=classifier_config.get('classifier_dropout', 0.5)
         )
 
     def reparameterize(self, mu, logvar):
