@@ -118,40 +118,93 @@ class StructureDecoder(nn.Module):
         return adj_rec_logits
 
 # --- 3. Attribute Decoder (Feature Reconstruction) ---
+class ResidualBlock(nn.Module):
+    """
+    A simple residual block for an MLP, consisting of:
+    Linear -> Norm -> Activation -> Dropout -> Linear -> Norm -> Dropout
+    And a residual connection.
+    """
+    def __init__(self, dim: int, dropout: float = 0.1):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.LayerNorm(dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim, dim),
+            nn.LayerNorm(dim),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # The core of a residual connection: output = input + f(input)
+        return x + self.block(x)
+
+
 class AttributeDecoder(nn.Module):
     """
-    Decodes latent embeddings back to the original node feature space using an MLP.
-    Applies Tanh activation to the output to control scale and prevent explosion.
+    An improved decoder that uses residual blocks for better stability and performance.
     """
-    def __init__(self, latent_dim: int, original_feature_dim: int, hidden_decoder_dim: Optional[int] = None):
+    def __init__(self, 
+                 latent_dim: int, 
+                 original_feature_dim: int, 
+                 hidden_dim_multiplier: int = 4,
+                 num_residual_blocks: int = 2,   
+                 dropout: float = 0.15):         
         """
         Args:
             latent_dim: Dimensionality of the latent embeddings.
             original_feature_dim: Dimensionality of the original node features to reconstruct.
-            hidden_decoder_dim: Dimensionality of the hidden layer in the MLP decoder.
-                                Defaults to latent_dim if None.
+            hidden_dim_multiplier: Multiplier for latent_dim to set the hidden dimension.
+            num_residual_blocks: Number of residual blocks to use. More blocks = deeper network.
+            dropout: Dropout rate for regularization.
         """
         super().__init__()
-        if hidden_decoder_dim is None:
-            hidden_decoder_dim = latent_dim
+        
+        hidden_dim = latent_dim * hidden_dim_multiplier
 
-        self.mlp = nn.Sequential(
-            Linear(latent_dim, hidden_decoder_dim),
-            nn.ReLU(),
-            #nn.ELU(),
-            Linear(hidden_decoder_dim, original_feature_dim),
+        # --- 1. Input Projection Layer ---
+        # A single linear layer to project the latent vector into the hidden dimension.
+        self.input_projection = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU()
         )
-        self.norm_layer = LayerNorm(original_feature_dim)
+
+        # --- 2. A Series of Residual Blocks ---
+        # This is the core of the improved decoder. It allows for a much deeper and more
+        # stable network architecture than a simple sequence of Linear layers.
+        self.residual_blocks = nn.Sequential(
+            *[ResidualBlock(hidden_dim, dropout) for _ in range(num_residual_blocks)]
+        )
+
+        # --- 3. Output Projection Layer ---
+        # A final linear layer to project from the hidden dimension back to the
+        # original feature dimension. No activation function is used here.
+        self.output_projection = nn.Linear(hidden_dim, original_feature_dim)
+
         self.reset_parameters()
 
     def reset_parameters(self):
-         for layer in self.mlp:
-             if hasattr(layer, 'reset_parameters'):
-                 layer.reset_parameters()
+        # A good practice to initialize layers
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
-        x_hat = self.mlp(z)
-        return self.norm_layer(x_hat)
+        # The forward pass is now a clean sequence of the three main components.
+        # 1. Project input to hidden dimension
+        h = self.input_projection(z)
+        
+        # 2. Pass through residual blocks
+        h = self.residual_blocks(h)
+        
+        # 3. Project output to original feature dimension
+        x_hat = self.output_projection(h)
+        
+        return x_hat
 
 
 # --- 5. Classifier MLP ---
