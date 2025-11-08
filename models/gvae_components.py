@@ -150,7 +150,7 @@ class AttributeDecoder(nn.Module):
                  original_feature_dim: int, 
                  hidden_dim_multiplier: int = 4,
                  num_residual_blocks: int = 2,   
-                 dropout: float = 0.15):         
+                 dropout: float = 0.2):         
         """
         Args:
             latent_dim: Dimensionality of the latent embeddings.
