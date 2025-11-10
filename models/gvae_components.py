@@ -149,7 +149,7 @@ class AttributeDecoder(nn.Module):
                  latent_dim: int, 
                  original_feature_dim: int, 
                  hidden_dim_multiplier: int = 4,
-                 num_residual_blocks: int = 2,   
+                 num_residual_blocks: int = 3,   
                  dropout: float = 0.2):         
         """
         Args:
