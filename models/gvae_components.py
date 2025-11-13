@@ -5,11 +5,13 @@ from torch_geometric.nn import GATv2Conv, Linear, LayerNorm, BatchNorm
 from torch_scatter import scatter_add, scatter_max
 from typing import Tuple, Optional
 
+
 class ViewEncoder(nn.Module):
     """
     Graph VAE Encoder using GATv2Conv to map node features and graph structure
     of a specific view to parameters of a latent Gaussian distribution (mu, logvar).
     """
+
     def __init__(self, in_channels: int, hidden_channels: int, latent_dim: int,
                  heads: int = 4, dropout: float = 0.5, num_gnn_layers: int = 2, edge_dim: int = -1):
         """
@@ -24,7 +26,8 @@ class ViewEncoder(nn.Module):
         """
         super().__init__()
         if num_gnn_layers not in [1, 2]:
-            raise ValueError("ViewEncoder currently supports 1 or 2 GNN layers.")
+            raise ValueError(
+                "ViewEncoder currently supports 1 or 2 GNN layers.")
 
         self.num_gnn_layers = num_gnn_layers
         self.dropout_p = dropout
@@ -35,7 +38,7 @@ class ViewEncoder(nn.Module):
         self.bn1 = LayerNorm(hidden_channels * heads)
 
         if num_gnn_layers > 1:
-            
+
             self.conv2 = GATv2Conv(hidden_channels * heads, hidden_channels, heads=heads, concat=True,
                                    dropout=dropout, edge_dim=edge_dim, add_self_loops=True)
             self.bn2 = LayerNorm(hidden_channels * heads)
@@ -83,16 +86,19 @@ class ViewEncoder(nn.Module):
         # Output Projections
         mu = self.fc_mu(x)
         logvar = self.fc_logvar(x)
-        #logvar = torch.tanh(self.fc_logvar(x)) * 5.0
-        #logvar = F.hardtanh(self.fc_logvar(x), min_val=-6.0, max_val=2.0)
+        # logvar = torch.tanh(self.fc_logvar(x)) * 5.0
+        # logvar = F.hardtanh(self.fc_logvar(x), min_val=-6.0, max_val=2.0)
         return mu, logvar
 
 # --- 2. Structure Decoder (Adjacency Reconstruction) ---
+
+
 class StructureDecoder(nn.Module):
     """
     Decodes latent embeddings to reconstruct graph adjacency matrix logits
     using inner product.
     """
+
     def __init__(self, activation: str = 'none'):
         """
         Args:
@@ -101,7 +107,7 @@ class StructureDecoder(nn.Module):
         """
         super().__init__()
         if activation not in ['sigmoid', 'none']:
-             raise ValueError("Activation must be 'sigmoid' or 'none'")
+            raise ValueError("Activation must be 'sigmoid' or 'none'")
         self.activation = activation
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
@@ -118,12 +124,15 @@ class StructureDecoder(nn.Module):
         return adj_rec_logits
 
 # --- 3. Attribute Decoder (Feature Reconstruction) ---
+
+
 class ResidualBlock(nn.Module):
     """
     A simple residual block for an MLP, consisting of:
     Linear -> Norm -> Activation -> Dropout -> Linear -> Norm -> Dropout
     And a residual connection.
     """
+
     def __init__(self, dim: int, dropout: float = 0.1):
         super().__init__()
         self.block = nn.Sequential(
@@ -145,12 +154,13 @@ class AttributeDecoder(nn.Module):
     """
     An improved decoder that uses residual blocks for better stability and performance.
     """
-    def __init__(self, 
-                 latent_dim: int, 
-                 original_feature_dim: int, 
-                 hidden_dim_multiplier: int = 4,
-                 num_residual_blocks: int = 3,   
-                 dropout: float = 0.2):         
+
+    def __init__(self,
+                 latent_dim: int,
+                 original_feature_dim: int,
+                 hidden_dim_multiplier: int = 3,
+                 num_residual_blocks: int = 2,
+                 dropout: float = 0.4):
         """
         Args:
             latent_dim: Dimensionality of the latent embeddings.
@@ -160,7 +170,7 @@ class AttributeDecoder(nn.Module):
             dropout: Dropout rate for regularization.
         """
         super().__init__()
-        
+
         hidden_dim = latent_dim * hidden_dim_multiplier
 
         # --- 1. Input Projection Layer ---
@@ -197,13 +207,13 @@ class AttributeDecoder(nn.Module):
         # The forward pass is now a clean sequence of the three main components.
         # 1. Project input to hidden dimension
         h = self.input_projection(z)
-        
+
         # 2. Pass through residual blocks
         h = self.residual_blocks(h)
-        
+
         # 3. Project output to original feature dimension
         x_hat = self.output_projection(h)
-        
+
         return x_hat
 
 
@@ -212,6 +222,7 @@ class ClassifierMLP(nn.Module):
     """
     Simple MLP for binary classification based on the fused embedding.
     """
+
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int = 1, dropout: float = 0.5):
         """
         Args:
@@ -225,14 +236,14 @@ class ClassifierMLP(nn.Module):
             Linear(input_dim, hidden_dim),
             nn.LeakyReLU(),
             nn.Dropout(p=dropout),
-            Linear(hidden_dim, output_dim) 
+            Linear(hidden_dim, output_dim)
         )
         self.reset_parameters()
 
     def reset_parameters(self):
-         for layer in self.mlp:
-             if hasattr(layer, 'reset_parameters'):
-                 layer.reset_parameters()
+        for layer in self.mlp:
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -244,12 +255,14 @@ class ClassifierMLP(nn.Module):
         """
         return self.mlp(x)
 
+
 class MHA_CLSToken_FusionLayer(nn.Module):
     """
     Fuses view embeddings using a learnable [CLS] token and Multi-Head Self-Attention.
     """
-    def __init__(self, embed_dim: int, num_heads: int, 
-                 ffn_dim_multiplier: int = 2, dropout: float = 0.1, 
+
+    def __init__(self, embed_dim: int, num_heads: int,
+                 ffn_dim_multiplier: int = 2, dropout: float = 0.1,
                  output_dim: Optional[int] = None):
         """
         Args:
@@ -267,12 +280,12 @@ class MHA_CLSToken_FusionLayer(nn.Module):
 
         # 2. The Multi-Head Attention layer
         self.mha = nn.MultiheadAttention(
-            embed_dim=embed_dim, 
-            num_heads=num_heads, 
-            dropout=dropout, 
-            batch_first=True 
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True
         )
-        
+
         # 3. A standard Feed-Forward Network (part of a Transformer block)
         self.ffn = nn.Sequential(
             nn.Linear(embed_dim, embed_dim * ffn_dim_multiplier),
@@ -286,13 +299,14 @@ class MHA_CLSToken_FusionLayer(nn.Module):
         self.norm2 = nn.LayerNorm(embed_dim)
 
         # 5. Optional final projection layer
-        self.final_projection = nn.Linear(embed_dim, self.output_dim) if embed_dim != self.output_dim else nn.Identity()
-        
+        self.final_projection = nn.Linear(
+            embed_dim, self.output_dim) if embed_dim != self.output_dim else nn.Identity()
+
     def forward(self, view_embeddings_stacked: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Args:
             view_embeddings_stacked: Tensor of view embeddings, shape [batch_size, num_views, embed_dim].
-        
+
         Returns:
             fused_embedding: A single fused vector per patient, shape [batch_size, output_dim].
             attention_weights: None, as extracting them is complex and not the primary goal.
@@ -301,7 +315,8 @@ class MHA_CLSToken_FusionLayer(nn.Module):
 
         # Prepend the CLS token to the sequence of view embeddings
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
-        x = torch.cat((cls_tokens, view_embeddings_stacked), dim=1) # Shape: [batch_size, num_views + 1, embed_dim]
+        # Shape: [batch_size, num_views + 1, embed_dim]
+        x = torch.cat((cls_tokens, view_embeddings_stacked), dim=1)
 
         # --- First part of Transformer Block: MHA + Residual + Norm ---
         # Self-attention: query, key, and value are all the same
@@ -315,19 +330,21 @@ class MHA_CLSToken_FusionLayer(nn.Module):
         # Residual connection
         x = x + ffn_output
         x = self.norm2(x)
-        
+
         # The final fused representation is the output of the CLS token (at position 0)
-        cls_output = x[:, 0, :] # Shape: [batch_size, embed_dim]
+        cls_output = x[:, 0, :]  # Shape: [batch_size, embed_dim]
 
         # Apply final projection
         fused_embedding = self.final_projection(cls_output)
 
-        return fused_embedding, None # Return None for attention weights
+        return fused_embedding, None  # Return None for attention weights
+
 
 class ProjectionHead(nn.Module):
     """
     Projects embeddings (typically mu from VAE) to a new space for contrastive learning.
     """
+
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, dropout: float = 0.1):
         """
         Args:
@@ -361,13 +378,14 @@ class ProjectionHead(nn.Module):
         """
         projected_x = self.net(x)
         return F.normalize(projected_x, p=2, dim=-1)
-    
+
 
 class FusionAndClassifierHead(nn.Module):
     """
     Fuses view embeddings (z_sampled) using a learnable [CLS] token, MHA,
     and then immediately classifies the resulting fused representation.
     """
+
     def __init__(self, embed_dim: int, num_heads: int,
                  classifier_hidden_dim: int,
                  ffn_dim_multiplier: int = 2,
@@ -400,11 +418,12 @@ class FusionAndClassifierHead(nn.Module):
 
         # --- Phần Classifier (MLP Head) ---
         self.classifier_head = nn.Sequential(
-            nn.LayerNorm(embed_dim), # Thêm một LayerNorm để ổn định đầu vào cho classifier
+            # Thêm một LayerNorm để ổn định đầu vào cho classifier
+            nn.LayerNorm(embed_dim),
             nn.Linear(embed_dim, classifier_hidden_dim),
             nn.ReLU(),
             nn.Dropout(p=classifier_dropout),
-            nn.Linear(classifier_hidden_dim, 1) # Output là 1 logit duy nhất
+            nn.Linear(classifier_hidden_dim, 1)  # Output là 1 logit duy nhất
         )
 
     def forward(self, view_embeddings_stacked: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
@@ -412,7 +431,7 @@ class FusionAndClassifierHead(nn.Module):
         Args:
             view_embeddings_stacked: Tensor of z_sampled from different views,
                                      shape [batch_size, num_views, embed_dim].
-        
+
         Returns:
             logits: The final classification logits, shape [batch_size, 1].
             attention_weights: None.
@@ -425,17 +444,18 @@ class FusionAndClassifierHead(nn.Module):
 
         attn_output, _ = self.mha(x, x, x)
         x = self.norm1(x + attn_output)
-        
+
         ffn_output = self.ffn(x)
         x = self.norm2(x + ffn_output)
-        
+
         # Lấy biểu diễn tổng hợp từ [CLS] token
-        cls_output = x[:, 0, :] # Shape: [batch_size, embed_dim]
+        cls_output = x[:, 0, :]  # Shape: [batch_size, embed_dim]
 
         # --- 2. Classification ---
         logits = self.classifier_head(cls_output)
 
         return logits, cls_output
+
 
 class RadiologyLesionAttentionAggregator(nn.Module):
     def __init__(self, lesion_feature_dim: int, patient_embed_dim: int,
@@ -443,7 +463,7 @@ class RadiologyLesionAttentionAggregator(nn.Module):
         super().__init__()
         self.lesion_feature_dim = lesion_feature_dim
         self.patient_embed_dim = patient_embed_dim
-        
+
         if attention_hidden_dim is None:
             attention_hidden_dim = lesion_feature_dim
 
@@ -452,16 +472,18 @@ class RadiologyLesionAttentionAggregator(nn.Module):
         self.attention_mlp = nn.Sequential(
             nn.Linear(lesion_feature_dim, attention_hidden_dim),
             nn.Tanh(),
-            nn.Linear(attention_hidden_dim, 1) 
+            nn.Linear(attention_hidden_dim, 1)
         )
 
         if lesion_feature_dim != patient_embed_dim:
-            self.output_projection = nn.Linear(lesion_feature_dim, patient_embed_dim)
+            self.output_projection = nn.Linear(
+                lesion_feature_dim, patient_embed_dim)
         else:
             self.output_projection = nn.Identity()
 
         self.dropout = nn.Dropout(dropout)
-        self.norm_layer = nn.LayerNorm(patient_embed_dim) # Normalize the final patient embedding
+        # Normalize the final patient embedding
+        self.norm_layer = nn.LayerNorm(patient_embed_dim)
 
         self.reset_parameters()
 
@@ -498,46 +520,56 @@ class RadiologyLesionAttentionAggregator(nn.Module):
                                device=lesion_x.device, dtype=lesion_x.dtype)
 
         batch_local_patient_indices = patient_to_lesion_edge_index[0]
-        batch_local_lesion_indices = patient_to_lesion_edge_index[1] 
+        batch_local_lesion_indices = patient_to_lesion_edge_index[1]
 
         relevant_lesion_features = lesion_x[batch_local_lesion_indices]
 
         # 1. Calculate attention scores for each lesion
-        attn_scores = self.attention_mlp(relevant_lesion_features)  # [num_batch_edges, 1]
+        attn_scores = self.attention_mlp(
+            relevant_lesion_features)  # [num_batch_edges, 1]
 
         # 2. Apply softmax grouped by patient to get attention weights
 
-        attn_scores_max_per_patient = scatter_max(attn_scores.squeeze(-1), batch_local_patient_indices, dim=0, dim_size=num_patients_in_batch)[0]
-        attn_scores_stabilized = attn_scores.squeeze(-1) - attn_scores_max_per_patient[batch_local_patient_indices]
-        
+        attn_scores_max_per_patient = scatter_max(
+            attn_scores.squeeze(-1), batch_local_patient_indices, dim=0, dim_size=num_patients_in_batch)[0]
+        attn_scores_stabilized = attn_scores.squeeze(
+            -1) - attn_scores_max_per_patient[batch_local_patient_indices]
+
         attn_exp = torch.exp(attn_scores_stabilized)
-        attn_exp_sum_per_patient = scatter_add(attn_exp, batch_local_patient_indices, dim=0, dim_size=num_patients_in_batch)
-        
-        attn_exp_sum_per_patient = attn_exp_sum_per_patient.clamp(min=1e-12) 
-        
-        alpha = attn_exp / attn_exp_sum_per_patient[batch_local_patient_indices] # [num_batch_edges]
-        alpha = alpha.unsqueeze(-1) # [num_batch_edges, 1]
+        attn_exp_sum_per_patient = scatter_add(
+            attn_exp, batch_local_patient_indices, dim=0, dim_size=num_patients_in_batch)
+
+        attn_exp_sum_per_patient = attn_exp_sum_per_patient.clamp(min=1e-12)
+
+        # [num_batch_edges]
+        alpha = attn_exp / \
+            attn_exp_sum_per_patient[batch_local_patient_indices]
+        alpha = alpha.unsqueeze(-1)  # [num_batch_edges, 1]
 
         # 3. Calculate weighted sum of lesion features for each patient
-        weighted_lesion_features = relevant_lesion_features * alpha # [num_batch_edges, lesion_feature_dim]
-        
+        weighted_lesion_features = relevant_lesion_features * \
+            alpha  # [num_batch_edges, lesion_feature_dim]
+
         # Aggregate weighted features per patient
         aggregated_patient_features = scatter_add(
             weighted_lesion_features, batch_local_patient_indices, dim=0, dim_size=num_patients_in_batch
-        ) # [num_patients_in_batch, lesion_feature_dim]
+        )  # [num_patients_in_batch, lesion_feature_dim]
 
         # 4. Optional output projection and normalization
-        projected_features = self.output_projection(aggregated_patient_features)
+        projected_features = self.output_projection(
+            aggregated_patient_features)
         projected_features = self.dropout(projected_features)
         normalized_features = self.norm_layer(projected_features)
-        
+
         return normalized_features
-    
+
+
 class MuFusionTransformer(nn.Module):
     """
     Fuses multiple mu vectors from different modalities into a single, richer latent vector
     using a Transformer Encoder layer and a [CLS] token.
     """
+
     def __init__(self, d_embed: int, n_heads: int, dim_feedforward: int, dropout: float = 0.1):
         """
         Args:
@@ -557,14 +589,16 @@ class MuFusionTransformer(nn.Module):
             nhead=n_heads,
             dim_feedforward=dim_feedforward,
             dropout=dropout,
-            batch_first=True  
+            batch_first=True
         )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layer, num_layers=1)
 
         # Optional: Positional embeddings for the views
         # For a fixed small number of views (3), it might not be strictly necessary,
         # but it's good practice.
-        self.positional_embedding = nn.Parameter(torch.randn(1, 4, d_embed)) # 1 for CLS + 3 for views
+        self.positional_embedding = nn.Parameter(
+            torch.randn(1, 4, d_embed))  # 1 for CLS + 3 for views
 
     def forward(self, mu_views: torch.Tensor) -> torch.Tensor:
         """
@@ -579,15 +613,17 @@ class MuFusionTransformer(nn.Module):
 
         # 1. Prepend the [CLS] token to the sequence of mu vectors
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
-        x = torch.cat((cls_tokens, mu_views), dim=1) # Shape: [batch_size, num_views + 1, d_embed]
-        
+        # Shape: [batch_size, num_views + 1, d_embed]
+        x = torch.cat((cls_tokens, mu_views), dim=1)
+
         # 2. Add positional embeddings
         x = x + self.positional_embedding
-        
+
         # 3. Pass through the Transformer Encoder
-        transformer_output = self.transformer_encoder(x) # Shape: [batch_size, num_views + 1, d_embed]
+        # Shape: [batch_size, num_views + 1, d_embed]
+        transformer_output = self.transformer_encoder(x)
 
         # 4. The output of the [CLS] token (at position 0) is the final fused representation
-        mu_fused = transformer_output[:, 0, :] # Shape: [batch_size, d_embed]
+        mu_fused = transformer_output[:, 0, :]  # Shape: [batch_size, d_embed]
 
         return mu_fused
