@@ -158,8 +158,8 @@ class AttributeDecoder(nn.Module):
     def __init__(self,
                  latent_dim: int,
                  original_feature_dim: int,
-                 hidden_dim_multiplier: int = 3,
-                 num_residual_blocks: int = 2,
+                 hidden_dim_multiplier: int = 4,
+                 num_residual_blocks: int = 3,
                  dropout: float = 0.4):
         """
         Args:
