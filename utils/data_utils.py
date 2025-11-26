@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, Tuple
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import MinMaxScaler
+from models.gvae_model import GVAE
 
 def get_view_subgraph_and_features(
     full_data: HeteroData,
@@ -208,3 +209,67 @@ def preprocess_fold_data_with_pca(
 
     print("  ✅ Preprocessing for fold complete.")
     return fold_data
+
+@torch.no_grad()
+def get_separate_view_mus(
+    gvae_model: GVAE,
+    full_data: HeteroData,
+    indices: torch.Tensor
+) -> Dict[str, torch.Tensor]:
+    """
+    Extracts separate mu vectors for each modality for a given batch of patients.
+
+    For patients missing a modality, the corresponding learnable 'missing embedding'
+    from the GVAE model is used as a placeholder.
+
+    Args:
+        gvae_model (GVAE): The pre-trained and frozen GVAE model.
+        full_data (HeteroData): The complete graph dataset.
+        indices (torch.Tensor): A tensor of global patient indices for the batch.
+
+    Returns:
+        Dict[str, torch.Tensor]: A dictionary where keys are view names (e.g., 'clinical')
+                                 and values are tensors of mu vectors of shape [batch_size, d_embed].
+    """
+    gvae_model.eval()
+    device = indices.device
+    num_patients = len(indices)
+    d_embed = gvae_model.d_embed
+    
+    # --- 1. Perform a single forward pass to get all available mu vectors ---
+    # The vae_outputs dictionary contains the computed mu vectors, but only for
+    # patients who actually have each view.
+    _, vae_outputs, _, _ = gvae_model(full_data, indices)
+
+    # --- 2. Create a mapping from global index to its position in the batch ---
+    # This is crucial for correctly placing the mu vectors.
+    global_to_batch_idx_map = {global_idx.item(): batch_idx 
+                               for batch_idx, global_idx in enumerate(indices)}
+
+    # --- 3. Initialize output dictionary and process each view ---
+    all_mus = {}
+    for view in gvae_model.views:
+        # a. Create a default tensor filled with the 'missing' embedding for this view.
+        # This will be the template we fill in.
+        missing_embedding = gvae_model.missing_embeddings_params[view].expand(num_patients, d_embed)
+        view_mus_tensor = missing_embedding.clone()
+
+        # b. Find which patients in this batch actually have this view.
+        # We re-use get_view_subgraph_and_features to get this list of indices.
+        _, _, _, global_indices_with_view = get_view_subgraph_and_features(full_data, view, indices)
+        
+        # c. If any patients have this view, get their mu vectors and place them.
+        if global_indices_with_view.numel() > 0 and vae_outputs[view].get('mu') is not None:
+            mus_for_this_view = vae_outputs[view]['mu']
+            
+            # Iterate through the patients that have the view
+            for i, global_idx in enumerate(global_indices_with_view):
+                # Find the patient's position (0, 1, 2...) within this specific batch
+                batch_idx = global_to_batch_idx_map[global_idx.item()]
+                
+                # Overwrite the 'missing' token with the actual computed mu vector
+                view_mus_tensor[batch_idx] = mus_for_this_view[i]
+        
+        all_mus[view] = view_mus_tensor
+        
+    return all_mus

@@ -48,3 +48,10 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+*.pkl
+*.pth
+*.csv
+*.json
+*.pt
+

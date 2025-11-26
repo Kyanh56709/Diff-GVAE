@@ -124,8 +124,6 @@ class StructureDecoder(nn.Module):
         return adj_rec_logits
 
 # --- 3. Attribute Decoder (Feature Reconstruction) ---
-
-
 class ResidualBlock(nn.Module):
     """
     A simple residual block for an MLP, consisting of:
@@ -627,3 +625,38 @@ class MuFusionTransformer(nn.Module):
         mu_fused = transformer_output[:, 0, :]  # Shape: [batch_size, d_embed]
 
         return mu_fused
+
+class StandaloneRadiologyMIL(nn.Module):
+    """
+    A wrapper class that treats the Lesion Aggregator as a Multiple Instance Learning (MIL)
+    classifier to predict patient response based ONLY on lesion features.
+    """
+    def __init__(self, agg_config):
+        super().__init__()
+        # Initialize the exact same aggregator used in GVAE
+        self.aggregator = RadiologyLesionAttentionAggregator(
+            lesion_feature_dim=agg_config['lesion_feature_dim'],
+            patient_embed_dim=agg_config['aggregated_output_dim'],
+            attention_hidden_dim=agg_config.get('attention_hidden_dim'),
+            dropout=agg_config.get('dropout', 0.5)
+        )
+        
+        # Simple linear classifier head
+        self.classifier = nn.Sequential(
+            nn.Linear(agg_config['aggregated_output_dim'], 64),
+            nn.ReLU(),
+            nn.Dropout(0.4),
+            nn.Linear(64, 1) # Binary output
+        )
+
+    def forward(self, lesion_x, patient_to_lesion_edge_index, num_patients):
+        # 1. Aggregate Lesions -> Patient Vector
+        patient_features = self.aggregator(
+            lesion_x, 
+            patient_to_lesion_edge_index, 
+            num_patients
+        )
+        # 2. Classify
+        logits = self.classifier(patient_features)
+        return logits
+

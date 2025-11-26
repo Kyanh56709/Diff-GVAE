@@ -74,21 +74,6 @@ class GVAE (nn.Module):
                     torch.randn(1, d_embed))
                 
 
-
-        # self.fusion_layer = MHA_CLSToken_FusionLayer(
-        #     embed_dim=d_embed,  # The dimension of your view embeddings
-        #     num_heads=fusion_config.get('num_fusion_heads', 4),
-        #     ffn_dim_multiplier=fusion_config.get('fusion_ffn_multiplier', 2),
-        #     dropout=fusion_config.get('dropout_fusion', 0.1),
-        #     output_dim=fusion_config.get('fused_dim', d_embed)
-        # )
-
-        # self.classifier = ClassifierMLP(
-        #     input_dim=fusion_config.get('fused_dim', d_embed),
-        #     hidden_dim=classifier_config['hidden_dim_classifier'],
-        #     output_dim=1, dropout=classifier_config.get('dropout_class', 0.5)
-        # )
-
         self.fusion_and_classifier_head = FusionAndClassifierHead(
             embed_dim=d_embed,
             num_heads=fusion_config.get('num_fusion_heads', 4),
