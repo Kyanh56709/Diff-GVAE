@@ -16,7 +16,7 @@ from models.gvae_model import GVAE
 from utils.training_utils import linear_anneal
 from utils.loss_utils import calculate_contrastive_loss
 from tqdm.notebook import tqdm
-from torch.optim import optim 
+import torch.optim as optim
 from models.gvae_components import StandaloneRadiologyMIL
 import copy
 from sklearn.metrics import precision_recall_curve
