@@ -2,11 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, reduce, repeat
-from tqdm.notebook import tqdm as tqdm_notebook
+from tqdm.notebook import tqdm 
 import sys
 from models.unet import DenoiseUNet
 from typing import Optional
-from tqdm import tqdm
+from tqdm.notebook import tqdm
 from itertools import combinations
 from typing import Optional, List, Tuple
 
@@ -186,7 +186,7 @@ class UnconditionalDDPM(nn.Module):
 
         x = torch.randn((num_samples, self.latent_dim), device=device)
 
-        for i in tqdm_notebook(reversed(range(self.timesteps)), desc="Unconditional Sampling", total=self.timesteps, leave=False):
+        for i in tqdm(reversed(range(self.timesteps)), desc="Unconditional Sampling", total=self.timesteps, leave=False):
             t = torch.full((num_samples,), i, device=device, dtype=torch.long)
 
             # Simple prediction, no guidance

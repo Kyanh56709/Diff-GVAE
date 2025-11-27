@@ -2,7 +2,7 @@ import torch
 import copy
 import torch.utils.data
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
-from tqdm.notebook import tqdm as tqdm_notebook
+from tqdm.notebook import tqdm
 from tqdm import tqdm
 # Import các thành phần cần thiết
 from models.gvae_model import GVAE
