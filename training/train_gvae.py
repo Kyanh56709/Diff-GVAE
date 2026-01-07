@@ -36,6 +36,16 @@ def kfold_train_gvae(
     # --- Define Feature Indices for Clinical View ---
     clinical_cont_idx = torch.arange(0, 5, device=device)
     clinical_bin_idx = torch.arange(5, 22, device=device) 
+    
+    # Calculate pos_weight for clinical binary features (imbalance handling)
+    clinical_x_cpu = full_multi_view_data_cpu['patient'].x_clinical    
+    # Indices 5 to 22 correspond to the binary features as defined above
+    clinical_bin_feats = clinical_x_cpu[:, 5:22]
+    n_pos = clinical_bin_feats.sum(dim=0)
+    n_neg = clinical_bin_feats.shape[0] - n_pos
+    # Weight = Neg / Pos
+    clinical_bin_pos_weight = n_neg / (n_pos + 1e-6)
+    clinical_bin_pos_weight = clinical_bin_pos_weight.to(device)
 
     # --- Main Task Loss Setup ---
     labels = full_multi_view_data_cpu['patient']['binary_label'].numpy()
@@ -44,14 +54,6 @@ def kfold_train_gvae(
     print(f"INFO: Using pos_weight for Main Task BCE loss: {pos_weight_value:.2f}")
     pos_weight_tensor = torch.tensor([pos_weight_value], device=device)
     
-    # Calculate weights for clinical binary features to balance the reconstruction loss
-    clinical_bin_features = full_multi_view_data_cpu['patient'].x[:, clinical_bin_idx.cpu()]
-    num_pos = torch.sum(clinical_bin_features == 1, dim=0)
-    num_neg = torch.sum(clinical_bin_features == 0, dim=0)
-    clinical_bin_pos_weights = num_neg / (num_pos + 1e-6)
-    clinical_bin_pos_weights = clinical_bin_pos_weights.to(device)
-    print(f"INFO: Using pos_weights for Clinical Binary reconstruction (first 5): {clinical_bin_pos_weights[:5].cpu().numpy().tolist()}")
-
     criterion_main_bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
     criterion_mse = nn.MSELoss()
     
@@ -172,7 +174,7 @@ def kfold_train_gvae(
                             loss_bin = F.binary_cross_entropy_with_logits(
                                 recon_x[:, clinical_bin_idx], 
                                 target_x[:, clinical_bin_idx],
-                                pos_weight=clinical_bin_pos_weights
+                                pos_weight=clinical_bin_pos_weight
                             )
                             rec_attr += view_weight * (loss_cont + loss_bin)
                         else:
@@ -240,7 +242,7 @@ def kfold_train_gvae(
                                 loss_bin_val = F.binary_cross_entropy_with_logits(
                                     recon_x_val[:, clinical_bin_idx], 
                                     target_x_val[:, clinical_bin_idx],
-                                    pos_weight=clinical_bin_pos_weights
+                                    pos_weight=clinical_bin_pos_weight
                                 )
                                 val_rec_attr += view_weight * (loss_cont_val + loss_bin_val)
                             else:
@@ -373,26 +375,13 @@ def train_gvae_single_fold(
         missing_strategy=model_config.get('missing_strategy', 'zero')
     ).to(device)
 
-    # --- Feature Indices and Weights for Clinical View ---
-    clinical_cont_idx = torch.arange(0, 5, device=device)
-    clinical_bin_idx = torch.arange(5, 22, device=device)
-
-    # Calculate Weights for Main Task and Clinical Binary Features
-    # (Using CPU for initial calculation to avoid device issues if needed)
-    labels_cpu = full_multi_view_data['patient']['binary_label'].cpu()
-    main_pos_weight = torch.tensor([torch.sum(labels_cpu == 0) / (torch.sum(labels_cpu == 1) + 1e-6)], device=device)
-    
-    clinical_x_cpu = full_multi_view_data['patient'].x.cpu()
-    bin_feats_cpu = clinical_x_cpu[:, 5:22]
-    clinical_bin_pos_weights = (torch.sum(bin_feats_cpu == 0, dim=0) / (torch.sum(bin_feats_cpu == 1, dim=0) + 1e-6)).to(device)
-
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=train_config['lr'], weight_decay=train_config['wd'])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=train_config.get('patience', 10),
     )
 
-    criterion_bce_logits = nn.BCEWithLogitsLoss(pos_weight=main_pos_weight)
+    criterion_bce_logits = nn.BCEWithLogitsLoss()
     criterion_mse = nn.MSELoss()
 
     # Lấy các trọng số loss từ config
@@ -445,17 +434,8 @@ def train_gvae_single_fold(
                 active_views += 1
                 w_attr = w_rec_attr_config.get(view, 1.0) if isinstance(
                     w_rec_attr_config, dict) else w_rec_attr_config
-                
-                if view == 'clinical':
-                    loss_cont = criterion_mse(vo['rec_x'][:, clinical_cont_idx], vo['original_x_subset'][:, clinical_cont_idx])
-                    loss_bin = F.binary_cross_entropy_with_logits(
-                        vo['rec_x'][:, clinical_bin_idx], 
-                        vo['original_x_subset'][:, clinical_bin_idx],
-                        pos_weight=clinical_bin_pos_weights
-                    )
-                    rec_attr += w_attr * (loss_cont + loss_bin)
-                else:
-                    rec_attr += w_attr * criterion_mse(vo['rec_x'], vo['original_x_subset'])
+                rec_attr += w_attr * \
+                    criterion_mse(vo['rec_x'], vo['original_x_subset'])
 
                 w_struct = w_rec_struct_config.get(view, 1.0) if isinstance(
                     w_rec_struct_config, dict) else w_rec_struct_config
@@ -514,17 +494,8 @@ def train_gvae_single_fold(
                         val_active_views += 1
                         w_attr = w_rec_attr_config.get(view, 1.0) if isinstance(
                             w_rec_attr_config, dict) else w_rec_attr_config
-                        
-                        if view == 'clinical':
-                            loss_cont_v = criterion_mse(vo['rec_x'][:, clinical_cont_idx], vo['original_x_subset'][:, clinical_cont_idx])
-                            loss_bin_v = F.binary_cross_entropy_with_logits(
-                                vo['rec_x'][:, clinical_bin_idx], 
-                                vo['original_x_subset'][:, clinical_bin_idx],
-                                pos_weight=clinical_bin_pos_weights
-                            )
-                            val_rec_attr += w_attr * (loss_cont_v + loss_bin_v)
-                        else:
-                            val_rec_attr += w_attr * criterion_mse(vo['rec_x'], vo['original_x_subset'])
+                        val_rec_attr += w_attr * \
+                            criterion_mse(vo['rec_x'], vo['original_x_subset'])
                         w_struct = w_rec_struct_config.get(view, 1.0) if isinstance(
                             w_rec_struct_config, dict) else w_rec_struct_config
                         val_rec_struct += w_struct * \
