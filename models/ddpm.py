@@ -36,13 +36,9 @@ class ConditionalDDPM(nn.Module):
         self.register_buffer('alphas_cumprod_prev', alphas_cumprod_prev)
         self.register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod))
         self.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1. - alphas_cumprod))
-        
-        # --- THE FIX IS HERE ---
-        # We add a small epsilon (1e-8) to the denominator to prevent division by zero or
-        # division by a very small number that leads to floating point instability.
+    
         posterior_variance = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod + 1e-8)
         self.register_buffer('posterior_variance', posterior_variance)
-        # --- END OF FIX ---
 
     def forward_process(self, x0, t, noise=None):
         if noise is None:
@@ -175,7 +171,7 @@ class UnconditionalDDPM(nn.Module):
         xt, noise = self.forward_process(x0, t)
 
         # Predict the noise using the U-Net. Pass `y=None`.
-        predicted_noise = self.denoise_fn(xt, t, y=None)
+        predicted_noise = self.denoise_fn(xt, t_batch, y=None)
 
         return F.mse_loss(predicted_noise, noise)
 
@@ -239,6 +235,8 @@ class AdaGN(nn.Module):
     """
     def __init__(self, dim: int, emb_dim: int, num_groups: int = 8):
         super().__init__()
+        # Ensure num_groups divides dim; fall back to a valid divisor
+        num_groups = _find_valid_num_groups(dim, num_groups)
         self.group_norm = nn.GroupNorm(num_groups, dim)
         self.silu = nn.SiLU()
         # Projects embedding to scale (gamma) and shift (beta)
@@ -260,6 +258,25 @@ class AdaGN(nn.Module):
         return x
 
 
+def _find_valid_num_groups(dim: int, desired: int = 8) -> int:
+    """Return the largest number of groups <= desired that evenly divides dim."""
+    for g in range(desired, 0, -1):
+        if dim % g == 0:
+            return g
+    return 1  # Fallback: no grouping
+
+
+def _round_up_to_lcm(value: int, num_modalities: int, n_heads: int) -> int:
+    """
+    Round `value` UP to the nearest multiple of lcm(num_modalities, n_heads)
+    so that hidden_dim splits evenly across modalities AND each modality-stream
+    dimension splits evenly across attention heads.
+    """
+    import math
+    lcm = (num_modalities * n_heads) // math.gcd(num_modalities, n_heads)
+    return ((value + lcm - 1) // lcm) * lcm
+
+
 # --- 1. Positional Embedding (Standard) ---
 class SinusoidalPositionEmbeddings(nn.Module):
     def __init__(self, dim):
@@ -279,6 +296,10 @@ class SinusoidalPositionEmbeddings(nn.Module):
 class DCA_Block(nn.Module):
     def __init__(self, d_embed: int, n_heads: int, num_modalities: int, dropout: float = 0.1):
         super().__init__()
+        assert d_embed % n_heads == 0, (
+            f"DCA_Block: d_embed ({d_embed}) must be divisible by n_heads ({n_heads}). "
+            f"This is determined by hidden_dim // num_modalities. Adjust hidden_dim or n_heads."
+        )
         self.num_modalities = num_modalities
         
         # Cross-attention layers
@@ -353,8 +374,18 @@ class MultimodalResnetBlock(nn.Module):
         super().__init__()
         self.num_modalities = num_modalities
         self.d_embed_out = out_channels // num_modalities
-        
-        assert out_channels % num_modalities == 0
+
+        assert in_channels % num_modalities == 0, (
+            f"in_channels ({in_channels}) must be divisible by num_modalities ({num_modalities})"
+        )
+        assert out_channels % num_modalities == 0, (
+            f"out_channels ({out_channels}) must be divisible by num_modalities ({num_modalities})"
+        )
+        assert self.d_embed_out % n_heads == 0, (
+            f"out_channels // num_modalities ({self.d_embed_out}) must be divisible by "
+            f"n_heads ({n_heads}). Adjust hidden_dim, num_modalities, or n_heads so that "
+            f"hidden_dim / num_modalities is a multiple of n_heads."
+        )
         
         # --- Pre-DCA: AdaGN -> Activation -> Linear ---
         self.adagn1_layers = nn.ModuleList([
@@ -435,8 +466,17 @@ class DenoiseDCAMLP(nn.Module):
         self.num_modalities = num_modalities
         input_dim = latent_dim_per_modality * num_modalities
         
+        # --- FIX: Round hidden_dim to be divisible by BOTH num_modalities and n_heads ---
+        # This guarantees hidden_dim / num_modalities is a whole number AND
+        # that whole number is divisible by n_heads (required by MultiheadAttention).
         raw_hidden_dim = input_dim * hidden_dim_multiplier
-        self.hidden_dim = (raw_hidden_dim // num_modalities) * num_modalities
+        self.hidden_dim = _round_up_to_lcm(raw_hidden_dim, num_modalities, n_heads)
+        
+        per_modality_dim = self.hidden_dim // num_modalities
+        assert per_modality_dim % n_heads == 0, (
+            f"Bug in dimension rounding: per-modality dim {per_modality_dim} "
+            f"is not divisible by n_heads {n_heads}"
+        )
         
         # Time & Class Embeddings
         time_dim = self.hidden_dim // 2
@@ -462,7 +502,7 @@ class DenoiseDCAMLP(nn.Module):
         self.layers = nn.ModuleList([
             MultimodalResnetBlock(
                 in_channels=self.hidden_dim,
-                out_channels=self.hidden_dim, # ResNet keeps dim constant usually
+                out_channels=self.hidden_dim,
                 time_emb_dim=time_dim,
                 num_modalities=num_modalities,
                 n_heads=n_heads,
@@ -501,4 +541,3 @@ class DenoiseDCAMLP(nn.Module):
             x = layer(x, t_emb)
 
         return self.output_proj(x)
-    
