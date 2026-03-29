@@ -33,7 +33,7 @@ def train_single_conditional_ddpm(
         )
 
     # --- 2. Scale Data ---
-    scaler = MinMaxScaler(feature_range=(-1, 1))
+    scaler = StandardScaler()
     train_latents_scaled = torch.tensor(scaler.fit_transform(train_latents), dtype=torch.float32)
     val_latents_scaled = torch.tensor(scaler.transform(val_latents), dtype=torch.float32)
     
