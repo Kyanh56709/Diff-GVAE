@@ -4,11 +4,24 @@ import torch.nn.functional as F
 from einops import rearrange, reduce, repeat
 from tqdm.notebook import tqdm 
 import sys
+import math
 from models.unet import DenoiseUNet
 from typing import Optional
 from tqdm.notebook import tqdm
 from itertools import combinations
 from typing import Optional, List, Tuple
+
+def cosine_beta_schedule(timesteps, s=0.008):
+    """
+    Cosine schedule as proposed in https://arxiv.org/abs/2102.09672.
+    """
+    steps = timesteps + 1
+    x = torch.linspace(0, timesteps, steps)
+    alphas_cumprod = torch.cos(((x / timesteps) + s) / (1.0 + s) * math.pi * 0.5) ** 2
+    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    # Clip beta để tránh các điểm kỳ dị toán học ở những timestep cuối cùng
+    return torch.clip(betas, 0.0001, 0.999)
 
 # --- 2. Conditional DDPM Wrapper ---
 class ConditionalDDPM(nn.Module):
@@ -23,6 +36,8 @@ class ConditionalDDPM(nn.Module):
 
         if beta_schedule == 'linear':
             betas = torch.linspace(1e-4, 0.02, timesteps)
+        elif beta_schedule == 'cosine':
+            betas = cosine_beta_schedule(timesteps)
         else:
             raise ValueError(f"Unknown beta schedule: {beta_schedule}")
 
