@@ -87,11 +87,6 @@ def kfold_train_gvae(
         
         train_indices = torch.tensor(train_global_idx_np, device=device)
         val_indices = torch.tensor(val_global_idx_np, device=device)
-        
-        train_mask = torch.zeros(fold_data['patient'].num_nodes, dtype=torch.bool, device=device)
-        train_mask[train_indices] = True
-        val_mask = torch.zeros(fold_data['patient'].num_nodes, dtype=torch.bool, device=device)
-        val_mask[val_indices] = True
 
         # -------------------------------------------------------
         # STEP 1: PRE-TRAIN RADIOLOGY AGGREGATOR
@@ -122,8 +117,14 @@ def kfold_train_gvae(
         best_model_state = None
         best_epoch_results = {}
 
-        # We pass all nodes to GVAE to get the graph structure, but we must mask losses later
-        all_node_indices = torch.arange(fold_data['patient'].num_nodes, device=device)
+        # --- Mini-batch setup ---
+        batch_size = train_config.get('batch_size', None)
+        if batch_size is not None and batch_size > 0 and batch_size < len(train_indices):
+            def make_batches(indices):
+                return torch.split(indices, batch_size)
+        else:
+            def make_batches(indices):
+                return [indices]
 
         for epoch in range(1, train_config['epochs'] + 1):
             # =================== TRAINING PHASE ===================
@@ -131,41 +132,31 @@ def kfold_train_gvae(
             w_kl = linear_anneal(epoch, 0, kl_end_e, kl_start_w, base_w_kl)
             w_cl = linear_anneal(epoch, 0, cl_end_e, cl_start_w, base_w_cross_cl)
             
-            # Forward pass on ALL data
-            logits, vae_out, cl_out, _ = model(fold_data, all_node_indices)
+            train_batches = make_batches(train_indices)
+            batch_train_losses = []
             
-            # 1. Main Classification Loss (Masked)
-            loss_class = criterion_main_bce(logits[train_mask].squeeze(), fold_data['patient'].binary_label[train_mask].float())
-            
-            # 2. Contrastive Loss
-            cl_out_train = {}
-            for view, (emb, idx) in cl_out.items():
-                # idx are global indices. Check which ones are in train_mask.
-                mask_for_view = train_mask[idx]
-                if mask_for_view.any():
-                    cl_out_train[view] = (emb[mask_for_view], idx[mask_for_view])
-            
-            if len(cl_out_train) > 0:
-                loss_cl = calculate_contrastive_loss(cl_out_train, train_config['cross_cl_temp'])
-            else:
-                loss_cl = torch.tensor(0.0, device=device)
-            
-            # 3. Reconstruction Losses (Mixed Strategy)
-            rec_attr, rec_struct, kl_div, active_views_train = 0.0, 0.0, 0.0, 0
-            
-            for view, vo in vae_out.items():
-                if vo and vo.get('mu') is not None:
-                    # We rely on cl_out to get the indices corresponding to vae_out outputs
-                    # (Assuming order is preserved, which it is in your GVAE implementation)
-                    view_global_indices = cl_out[view][1]
-                    view_train_mask = train_mask[view_global_indices]
-                    
-                    if view_train_mask.any():
+            for batch_idx in train_batches:
+                logits, vae_out, cl_out, _ = model(fold_data, batch_idx)
+                labels = fold_data['patient'].binary_label[batch_idx]
+                
+                # 1. Main Classification Loss
+                loss_class = criterion_main_bce(logits.squeeze(), labels.float())
+                
+                # 2. Contrastive Loss
+                if len(cl_out) > 0:
+                    loss_cl = calculate_contrastive_loss(cl_out, train_config['cross_cl_temp'])
+                else:
+                    loss_cl = torch.tensor(0.0, device=device)
+                
+                # 3. Reconstruction Losses (Mixed Strategy)
+                rec_attr, rec_struct, kl_div, active_views_train = 0.0, 0.0, 0.0, 0
+                
+                for view, vo in vae_out.items():
+                    if vo and vo.get('mu') is not None:
                         active_views_train += 1
                         
-                        # Filter reconstruction outputs using the mask
-                        target_x = vo['original_x_subset'][view_train_mask]
-                        recon_x = vo['rec_x'][view_train_mask]
+                        target_x = vo['original_x_subset']
+                        recon_x = vo['rec_x']
                         
                         view_weight = w_rec_attr_config.get(view, 1.0)
                         
@@ -180,83 +171,74 @@ def kfold_train_gvae(
                         else:
                             rec_attr += view_weight * criterion_mse(recon_x, target_x)
 
-                        # Structure Loss (Masked)
-                        adj_train_mask = view_train_mask.unsqueeze(1) & view_train_mask.unsqueeze(0)
-                        if adj_train_mask.any():
-                             rec_struct += w_rec_struct_config * F.binary_cross_entropy_with_logits(
-                                 vo['rec_adj_logits'][adj_train_mask], 
-                                 vo['original_adj_subset'][adj_train_mask]
-                             )
+                        # Structure Loss
+                        rec_struct += w_rec_struct_config * F.binary_cross_entropy_with_logits(
+                             vo['rec_adj_logits'].flatten(), 
+                             vo['original_adj_subset'].flatten()
+                        )
                         
-                        # KL Divergence (Masked)
-                        kl_term = 1 + vo['logvar'][view_train_mask] - vo['mu'][view_train_mask].pow(2) - vo['logvar'][view_train_mask].exp()
+                        # KL Divergence
+                        kl_term = 1 + vo['logvar'] - vo['mu'].pow(2) - vo['logvar'].exp()
                         kl_div += -0.5 * kl_term.sum(dim=1).mean()
 
-            avg_rec_attr = rec_attr / active_views_train if active_views_train > 0 else 0.0
-            avg_rec_struct = rec_struct / active_views_train if active_views_train > 0 else 0.0
-            avg_kl = kl_div / active_views_train if active_views_train > 0 else 0.0
+                avg_rec_attr = rec_attr / active_views_train if active_views_train > 0 else 0.0
+                avg_rec_struct = rec_struct / active_views_train if active_views_train > 0 else 0.0
+                avg_kl = kl_div / active_views_train if active_views_train > 0 else 0.0
+                
+                total_train_loss = (base_w_class * loss_class + w_cl * loss_cl + avg_rec_attr + avg_rec_struct + w_kl * avg_kl)
+                
+                optimizer.zero_grad()
+                total_train_loss.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=train_config.get('grad_clip_norm', 1.0))
+                optimizer.step()
+                
+                batch_train_losses.append(total_train_loss.item())
             
-            total_train_loss = (base_w_class * loss_class + w_cl * loss_cl + avg_rec_attr + avg_rec_struct + w_kl * avg_kl)
-            
-            optimizer.zero_grad()
-            total_train_loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=train_config.get('grad_clip_norm', 1.0))
-            optimizer.step()
+            total_train_loss = torch.tensor(np.mean(batch_train_losses), device=device)
 
             # =================== VALIDATION PHASE ===================
             model.eval()
             with torch.no_grad():
-                # Mask Classification
-                val_logits = logits[val_mask]
-                val_labels = fold_data['patient'].binary_label[val_mask]
+                val_logits, val_vae_out, val_cl_out, _ = model(fold_data, val_indices)
+                val_labels = fold_data['patient'].binary_label[val_indices]
+                
+                # 1. Classification Loss
                 val_loss_class = criterion_main_bce(val_logits.squeeze(), val_labels.float())
                 
-                # Mask Contrastive Loss for Validation
-                cl_out_val = {}
-                for view, (emb, idx) in cl_out.items():
-                    mask_for_view = val_mask[idx]
-                    if mask_for_view.any():
-                        cl_out_val[view] = (emb[mask_for_view], idx[mask_for_view])
-                
-                if len(cl_out_val) > 0:
-                    val_loss_cl = calculate_contrastive_loss(cl_out_val, train_config['cross_cl_temp'])
+                # 2. Contrastive Loss
+                if len(val_cl_out) > 0:
+                    val_loss_cl = calculate_contrastive_loss(val_cl_out, train_config['cross_cl_temp'])
                 else:
                     val_loss_cl = torch.tensor(0.0, device=device)
 
                 val_rec_attr, val_rec_struct, val_kl_div, val_active_views = 0.0, 0.0, 0.0, 0
                 
-                for view, vo in vae_out.items():
+                for view, vo in val_vae_out.items():
                     if vo and vo.get('mu') is not None:
-                        view_global_indices = cl_out[view][1]
-                        view_val_mask = val_mask[view_global_indices]
+                        val_active_views += 1
                         
-                        if view_val_mask.any():
-                            val_active_views += 1
-                            
-                            target_x_val = vo['original_x_subset'][view_val_mask]
-                            recon_x_val = vo['rec_x'][view_val_mask]
-                            view_weight = w_rec_attr_config.get(view, 1.0)
+                        target_x_val = vo['original_x_subset']
+                        recon_x_val = vo['rec_x']
+                        view_weight = w_rec_attr_config.get(view, 1.0)
 
-                            if view == 'clinical':
-                                loss_cont_val = criterion_mse(recon_x_val[:, clinical_cont_idx], target_x_val[:, clinical_cont_idx])
-                                loss_bin_val = F.binary_cross_entropy_with_logits(
-                                    recon_x_val[:, clinical_bin_idx], 
-                                    target_x_val[:, clinical_bin_idx],
-                                    pos_weight=clinical_bin_pos_weight
-                                )
-                                val_rec_attr += view_weight * (loss_cont_val + loss_bin_val)
-                            else:
-                                val_rec_attr += view_weight * criterion_mse(recon_x_val, target_x_val)
+                        if view == 'clinical':
+                            loss_cont_val = criterion_mse(recon_x_val[:, clinical_cont_idx], target_x_val[:, clinical_cont_idx])
+                            loss_bin_val = F.binary_cross_entropy_with_logits(
+                                recon_x_val[:, clinical_bin_idx], 
+                                target_x_val[:, clinical_bin_idx],
+                                pos_weight=clinical_bin_pos_weight
+                            )
+                            val_rec_attr += view_weight * (loss_cont_val + loss_bin_val)
+                        else:
+                            val_rec_attr += view_weight * criterion_mse(recon_x_val, target_x_val)
 
-                            adj_val_mask = view_val_mask.unsqueeze(1) & view_val_mask.unsqueeze(0)
-                            if adj_val_mask.any():
-                                val_rec_struct += w_rec_struct_config * F.binary_cross_entropy_with_logits(
-                                    vo['rec_adj_logits'][adj_val_mask], 
-                                    vo['original_adj_subset'][adj_val_mask]
-                                )
-                            
-                            kl_term_val = 1 + vo['logvar'][view_val_mask] - vo['mu'][view_val_mask].pow(2) - vo['logvar'][view_val_mask].exp()
-                            val_kl_div += -0.5 * kl_term_val.sum(dim=1).mean()
+                        val_rec_struct += w_rec_struct_config * F.binary_cross_entropy_with_logits(
+                            vo['rec_adj_logits'].flatten(), 
+                            vo['original_adj_subset'].flatten()
+                        )
+                        
+                        kl_term_val = 1 + vo['logvar'] - vo['mu'].pow(2) - vo['logvar'].exp()
+                        val_kl_div += -0.5 * kl_term_val.sum(dim=1).mean()
 
                 val_avg_rec_attr = val_rec_attr / val_active_views if val_active_views > 0 else 0.0
                 val_avg_rec_struct = val_rec_struct / val_active_views if val_active_views > 0 else 0.0
@@ -295,7 +277,7 @@ def kfold_train_gvae(
                 break
             
             if epoch % 10 == 0:
-                 print(f"  Epoch {epoch:03d} | TLoss: {total_train_loss:.4f} | VLoss: {total_val_loss:.4f} | VAUC: {current_val_auc:.4f}")
+                 print(f"  Epoch {epoch:03d} | TLoss: {total_train_loss.item():.4f} | VLoss: {total_val_loss.item():.4f} | VAUC: {current_val_auc:.4f}")
         
         # --- Save Results ---
         if best_epoch_results:
@@ -364,6 +346,16 @@ def train_gvae_single_fold(
     """
     device = train_config['device']
 
+    # --- 0. Pre-train Radiology Aggregator (if applicable) ---
+    radiology_state_dict = None
+    if 'radiology' in model_config['view_configs'] and model_config.get('radiology_aggregator_config'):
+        radiology_state_dict = pretrain_radiology_aggregator(
+            full_multi_view_data, 
+            train_indices, 
+            model_config['radiology_aggregator_config'], 
+            device
+        )
+
     # --- 1. Model, Optimizer, and Loss Initialization ---
     model = GVAE(
         view_configs=model_config['view_configs'],
@@ -374,6 +366,10 @@ def train_gvae_single_fold(
         d_embed=model_config['d_embed'],
         missing_strategy=model_config.get('missing_strategy', 'zero')
     ).to(device)
+
+    if radiology_state_dict is not None:
+        print(f"   [Fold {fold_num}] Loading pre-trained radiology aggregator weights...")
+        model.radiology_lesion_aggregator.load_state_dict(radiology_state_dict)
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=train_config['lr'], weight_decay=train_config['wd'])
@@ -411,6 +407,15 @@ def train_gvae_single_fold(
     epochs_no_improve = 0
     best_model_state = None
 
+    # --- Mini-batch setup ---
+    batch_size = train_config.get('batch_size', None)
+    if batch_size is not None and batch_size > 0 and batch_size < len(train_indices):
+        def make_batches(indices):
+            return torch.split(indices, batch_size)
+    else:
+        def make_batches(indices):
+            return [indices]
+
     for epoch in range(1, train_config['epochs'] + 1):
         # --- Training Phase ---
         model.train()
@@ -420,55 +425,63 @@ def train_gvae_single_fold(
         w_cl = linear_anneal(epoch, cl_start_e, cl_end_e,
                              cl_start_w, base_w_cross_cl)
 
-        logits, vae_out, cl_out, _ = model(full_multi_view_data, train_indices)
-        labels = full_multi_view_data['patient']['binary_label'].to(device)[train_indices]
+        train_batches = make_batches(train_indices)
+        batch_train_losses = []
 
-        # Calculate all loss components for training
-        loss_class = criterion_bce_logits(logits.squeeze(), labels.float())
-        loss_cl = calculate_contrastive_loss(
-            cl_out, train_config['cross_cl_temp'])
+        for batch_idx in train_batches:
+            logits, vae_out, cl_out, _ = model(full_multi_view_data, batch_idx)
+            labels = full_multi_view_data['patient']['binary_label'].to(device)[batch_idx]
 
-        rec_attr, rec_struct, kl_div, active_views = 0.0, 0.0, 0.0, 0
-        for view, vo in vae_out.items():
-            if vo and vo.get('mu') is not None:
-                active_views += 1
-                w_attr = w_rec_attr_config.get(view, 1.0) if isinstance(
-                    w_rec_attr_config, dict) else w_rec_attr_config
-                rec_attr += w_attr * \
-                    criterion_mse(vo['rec_x'], vo['original_x_subset'])
+            # Calculate all loss components for training
+            loss_class = criterion_bce_logits(logits.squeeze(), labels.float())
+            loss_cl = calculate_contrastive_loss(
+                cl_out, train_config['cross_cl_temp'])
 
-                w_struct = w_rec_struct_config.get(view, 1.0) if isinstance(
-                    w_rec_struct_config, dict) else w_rec_struct_config
-                rec_struct += w_struct * \
-                    criterion_bce_logits(
-                        vo['rec_adj_logits'].flatten(), vo['original_adj_subset'].flatten())
+            rec_attr, rec_struct, kl_div, active_views = 0.0, 0.0, 0.0, 0
+            for view, vo in vae_out.items():
+                if vo and vo.get('mu') is not None:
+                    active_views += 1
+                    w_attr = w_rec_attr_config.get(view, 1.0) if isinstance(
+                        w_rec_attr_config, dict) else w_rec_attr_config
+                    rec_attr += w_attr * \
+                        criterion_mse(vo['rec_x'], vo['original_x_subset'])
 
-                kl_div += -0.5 * \
-                    torch.sum(1 + vo['logvar'] - vo['mu'].pow(2) -
-                              vo['logvar'].exp(), dim=1).mean()
+                    w_struct = w_rec_struct_config.get(view, 1.0) if isinstance(
+                        w_rec_struct_config, dict) else w_rec_struct_config
+                    rec_struct += w_struct * \
+                        criterion_bce_logits(
+                            vo['rec_adj_logits'].flatten(), vo['original_adj_subset'].flatten())
 
-        avg_rec_attr = rec_attr / \
-            active_views if active_views > 0 else torch.tensor(
-                0.0, device=device)
-        avg_rec_struct = rec_struct / \
-            active_views if active_views > 0 else torch.tensor(
-                0.0, device=device)
-        avg_kl = kl_div / \
-            active_views if active_views > 0 else torch.tensor(
-                0.0, device=device)
+                    kl_div += -0.5 * \
+                        torch.sum(1 + vo['logvar'] - vo['mu'].pow(2) -
+                                  vo['logvar'].exp(), dim=1).mean()
 
-        total_train_loss = (base_w_class * loss_class +
-                            w_cl * loss_cl +
-                            avg_rec_attr +
-                            avg_rec_struct +
-                            w_kl * avg_kl)
+            avg_rec_attr = rec_attr / \
+                active_views if active_views > 0 else torch.tensor(
+                    0.0, device=device)
+            avg_rec_struct = rec_struct / \
+                active_views if active_views > 0 else torch.tensor(
+                    0.0, device=device)
+            avg_kl = kl_div / \
+                active_views if active_views > 0 else torch.tensor(
+                    0.0, device=device)
 
-        if not torch.isnan(total_train_loss):
-            optimizer.zero_grad()
-            total_train_loss.backward()
-            nn.utils.clip_grad_norm_(
-                model.parameters(), train_config['grad_clip_norm'])
-            optimizer.step()
+            total_train_loss = (base_w_class * loss_class +
+                                w_cl * loss_cl +
+                                avg_rec_attr +
+                                avg_rec_struct +
+                                w_kl * avg_kl)
+
+            if not torch.isnan(total_train_loss):
+                optimizer.zero_grad()
+                total_train_loss.backward()
+                nn.utils.clip_grad_norm_(
+                    model.parameters(), train_config['grad_clip_norm'])
+                optimizer.step()
+            
+            batch_train_losses.append(total_train_loss.item())
+        
+        total_train_loss = torch.tensor(np.mean(batch_train_losses), device=device)
 
         # --- Validation Phase ---
         model.eval()

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GATv2Conv, Linear, LayerNorm, BatchNorm
-from torch_scatter import scatter_add, scatter_max
+from torch_scatter import scatter_add, scatter_max, scatter_mean
 from typing import Tuple, Optional
 
 
@@ -286,10 +286,10 @@ class MHA_CLSToken_FusionLayer(nn.Module):
 
         # 3. A standard Feed-Forward Network (part of a Transformer block)
         self.ffn = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim * ffn_dim_multiplier),
+            nn.Linear(embed_dim, int(embed_dim * ffn_dim_multiplier)),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(embed_dim * ffn_dim_multiplier, embed_dim)
+            nn.Linear(int(embed_dim * ffn_dim_multiplier), embed_dim)
         )
 
         # 4. Layer Normalization
@@ -406,10 +406,10 @@ class FusionAndClassifierHead(nn.Module):
             embed_dim=embed_dim, num_heads=num_heads, dropout=fusion_dropout, batch_first=True
         )
         self.ffn = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim * ffn_dim_multiplier),
+            nn.Linear(embed_dim, int(embed_dim * ffn_dim_multiplier)),
             nn.GELU(),
             nn.Dropout(fusion_dropout),
-            nn.Linear(embed_dim * ffn_dim_multiplier, embed_dim)
+            nn.Linear(int(embed_dim * ffn_dim_multiplier), embed_dim)
         )
         self.norm1 = nn.LayerNorm(embed_dim)
         self.norm2 = nn.LayerNorm(embed_dim)
@@ -418,10 +418,10 @@ class FusionAndClassifierHead(nn.Module):
         self.classifier_head = nn.Sequential(
             # Thêm một LayerNorm để ổn định đầu vào cho classifier
             nn.LayerNorm(embed_dim),
-            nn.Linear(embed_dim, classifier_hidden_dim),
+            nn.Linear(embed_dim, int(classifier_hidden_dim)),
             nn.ReLU(),
             nn.Dropout(p=classifier_dropout),
-            nn.Linear(classifier_hidden_dim, 1)  # Output là 1 logit duy nhất
+            nn.Linear(int(classifier_hidden_dim), 1)  # Output là 1 logit duy nhất
         )
 
     def forward(self, view_embeddings_stacked: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
@@ -465,11 +465,17 @@ class RadiologyLesionAttentionAggregator(nn.Module):
         if attention_hidden_dim is None:
             attention_hidden_dim = lesion_feature_dim
 
-        # Attention mechanism: learns to score lesions
-        # Takes individual lesion features
+        # Pre-attention layer norm for training stability
+        self.lesion_norm = nn.LayerNorm(lesion_feature_dim)
+
+        # Context projection: compute patient-level context via mean pooling
+        self.context_proj = nn.Linear(lesion_feature_dim, attention_hidden_dim)
+
+        # Context-aware attention scorer: lesion features + patient context
         self.attention_mlp = nn.Sequential(
-            nn.Linear(lesion_feature_dim, attention_hidden_dim),
-            nn.Tanh(),
+            nn.Linear(lesion_feature_dim + attention_hidden_dim, attention_hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
             nn.Linear(attention_hidden_dim, 1)
         )
 
@@ -492,11 +498,15 @@ class RadiologyLesionAttentionAggregator(nn.Module):
         if isinstance(self.output_projection, nn.Linear):
             self.output_projection.reset_parameters()
         self.norm_layer.reset_parameters()
+        if hasattr(self, 'lesion_norm') and hasattr(self.lesion_norm, 'reset_parameters'):
+            self.lesion_norm.reset_parameters()
+        if hasattr(self, 'context_proj') and hasattr(self.context_proj, 'reset_parameters'):
+            self.context_proj.reset_parameters()
 
     def forward(self, lesion_x: torch.Tensor, patient_to_lesion_edge_index: torch.Tensor,
                 num_patients_in_batch: int) -> torch.Tensor:
         """
-        Aggregates lesion features for patients using attention.
+        Aggregates lesion features for patients using context-aware attention.
 
         Args:
             lesion_x: Tensor of lesion features [total_lesions_in_batch, lesion_feature_dim].
@@ -521,13 +531,21 @@ class RadiologyLesionAttentionAggregator(nn.Module):
         batch_local_lesion_indices = patient_to_lesion_edge_index[1]
 
         relevant_lesion_features = lesion_x[batch_local_lesion_indices]
+        relevant_lesion_features = self.lesion_norm(relevant_lesion_features)
 
-        # 1. Calculate attention scores for each lesion
-        attn_scores = self.attention_mlp(
-            relevant_lesion_features)  # [num_batch_edges, 1]
+        # 1. Compute patient context via mean pooling of their lesions
+        patient_context = scatter_mean(
+            relevant_lesion_features, batch_local_patient_indices,
+            dim=0, dim_size=num_patients_in_batch
+        )  # [num_patients_in_batch, lesion_feature_dim]
+        patient_context_proj = self.context_proj(patient_context)
+        context_per_lesion = patient_context_proj[batch_local_patient_indices]
 
-        # 2. Apply softmax grouped by patient to get attention weights
+        # 2. Calculate context-aware attention scores for each lesion
+        attn_input = torch.cat([relevant_lesion_features, context_per_lesion], dim=-1)
+        attn_scores = self.attention_mlp(attn_input)  # [num_batch_edges, 1]
 
+        # 3. Apply softmax grouped by patient to get attention weights
         attn_scores_max_per_patient = scatter_max(
             attn_scores.squeeze(-1), batch_local_patient_indices, dim=0, dim_size=num_patients_in_batch)[0]
         attn_scores_stabilized = attn_scores.squeeze(
@@ -540,22 +558,19 @@ class RadiologyLesionAttentionAggregator(nn.Module):
         attn_exp_sum_per_patient = attn_exp_sum_per_patient.clamp(min=1e-12)
 
         # [num_batch_edges]
-        alpha = attn_exp / \
-            attn_exp_sum_per_patient[batch_local_patient_indices]
+        alpha = attn_exp / attn_exp_sum_per_patient[batch_local_patient_indices]
         alpha = alpha.unsqueeze(-1)  # [num_batch_edges, 1]
 
-        # 3. Calculate weighted sum of lesion features for each patient
-        weighted_lesion_features = relevant_lesion_features * \
-            alpha  # [num_batch_edges, lesion_feature_dim]
+        # 4. Calculate weighted sum of lesion features for each patient
+        weighted_lesion_features = relevant_lesion_features * alpha
 
         # Aggregate weighted features per patient
         aggregated_patient_features = scatter_add(
             weighted_lesion_features, batch_local_patient_indices, dim=0, dim_size=num_patients_in_batch
         )  # [num_patients_in_batch, lesion_feature_dim]
 
-        # 4. Optional output projection and normalization
-        projected_features = self.output_projection(
-            aggregated_patient_features)
+        # 5. Optional output projection and normalization
+        projected_features = self.output_projection(aggregated_patient_features)
         projected_features = self.dropout(projected_features)
         normalized_features = self.norm_layer(projected_features)
 
