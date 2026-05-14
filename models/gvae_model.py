@@ -118,33 +118,26 @@ class GVAE (nn.Module):
                 patient_lesion_edges_all = full_data['patient', 'has_lesion', 'lesion'].edge_index.to(device)
                 all_lesion_features_all = full_data['lesion'].x.to(device)
                 
-
-                active_patient_global_to_local_map = {glob_idx.item(): i for i, glob_idx in enumerate(global_indices_subset_patients.cpu())}
+                # Vectorized edge filtering: keep only edges from active patients
+                edge_mask = torch.isin(patient_lesion_edges_all[0], global_indices_subset_patients)
+                filtered_edges = patient_lesion_edges_all[:, edge_mask]
                 
-                batch_lesion_src_patient_local_idx_list = []
-                batch_lesion_node_global_idx_list = []
-
-                # Vòng lặp này bây giờ sẽ nhanh hơn vì patient_lesion_edges_all đã ở trên GPU
-                for i_edge in range(patient_lesion_edges_all.shape[1]):
-                    src_patient_global = patient_lesion_edges_all[0, i_edge].item()
-                    dst_lesion_global = patient_lesion_edges_all[1, i_edge].item()
-                    if src_patient_global in active_patient_global_to_local_map:
-                        batch_lesion_src_patient_local_idx_list.append(active_patient_global_to_local_map[src_patient_global])
-                        batch_lesion_node_global_idx_list.append(dst_lesion_global)
-                
-                if batch_lesion_node_global_idx_list:
-                    batch_lesion_src_patient_local_idx_t = torch.tensor(batch_lesion_src_patient_local_idx_list, dtype=torch.long, device=device)
-                    batch_lesion_node_global_idx_t = torch.tensor(batch_lesion_node_global_idx_list, dtype=torch.long, device=device)
+                if filtered_edges.numel() > 0:
+                    # Map global patient indices to local batch indices (0, 1, 2, ...)
+                    max_patient_idx = patient_lesion_edges_all[0].max().item() + 1
+                    global_to_local = torch.full((max_patient_idx,), -1, dtype=torch.long, device=device)
+                    global_to_local[global_indices_subset_patients] = torch.arange(num_active_patients_for_view, device=device)
+                    batch_lesion_src_patient_local_idx_t = global_to_local[filtered_edges[0]]
                     
-                    # Thao tác indexing bây giờ sẽ thành công vì cả hai tensor đều trên GPU
-                    lesion_features_for_batch_agg = all_lesion_features_all[batch_lesion_node_global_idx_t]
+                    batch_lesion_node_global_idx_t = filtered_edges[1]
                     
-                    unique_lesions_in_batch, inverse_indices = torch.unique(batch_lesion_node_global_idx_t, return_inverse=True)
-                    batch_local_lesion_indices_for_agg = torch.arange(lesion_features_for_batch_agg.shape[0], device=device)
-
+                    # Deduplicate lesions: unique features + remapped edge indices
+                    unique_lesion_global_indices, inverse_local_indices = torch.unique(batch_lesion_node_global_idx_t, return_inverse=True)
+                    lesion_features_for_batch_agg = all_lesion_features_all[unique_lesion_global_indices]
+                    
                     patient_to_batch_lesion_edge_index = torch.stack([
                         batch_lesion_src_patient_local_idx_t,
-                        batch_local_lesion_indices_for_agg
+                        inverse_local_indices
                     ], dim=0)
 
                     x_for_vae_encoder = self.radiology_lesion_aggregator(
