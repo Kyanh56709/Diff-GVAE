@@ -61,6 +61,25 @@ Key `train_config` keys:
 - `cross_cl_temp`: temperature for contrastive loss
 - `print_every_k_epochs`: logging frequency
 
+## New Feature Flags (v2)
+
+These flags were added in the gvae-lesion-agg-fixes branch. All default to current behavior.
+
+### model_config flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `logvar_clamp` | `Tuple[float,float] \| None` | `None` | Clamp encoder logvar to `(min, max)`. Recommended: `(-6.0, 2.0)`. |
+| `radiology_zero_lesion_passthrough` | `bool` | `False` | When True, radiology patients with zero lesions passthrough encoder instead of getting missing embedding. |
+
+### train_config flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `pretrain_use_pos_weight` | `bool` | `False` | Class-weighted BCE loss in radiology pretraining. |
+| `pretrain_val_split` | `float` | `0.0` | Fraction of pretraining data held out for validation + early stopping. |
+| `vectorized_contrastive` | `bool` | `False` | Use vectorized InfoNCE implementation for contrastive loss. |
+
 ## Dependencies
 
 ```
