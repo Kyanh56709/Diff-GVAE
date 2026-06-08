@@ -153,6 +153,17 @@ class GVAE (nn.Module):
                     )
                     original_x_for_vae_reconstruction = x_for_vae_encoder
                 
+                elif self.radiology_zero_lesion_passthrough:
+                    # Rad-masked patients but zero lesions in this batch: feed zeros
+                    # through the encoder (aggregator returns zeros) instead of skipping.
+                    empty_edges = torch.empty((2, 0), dtype=torch.long, device=device)
+                    empty_feats = torch.zeros((0, all_lesion_features_all.shape[1]),
+                                              dtype=all_lesion_features_all.dtype, device=device)
+                    x_for_vae_encoder = self.radiology_lesion_aggregator(
+                        empty_feats, empty_edges, num_active_patients_for_view
+                    )
+                    original_x_for_vae_reconstruction = x_for_vae_encoder
+                
             elif x_patient_level_subset is not None and x_patient_level_subset.numel() > 0:
                 x_for_vae_encoder = x_patient_level_subset
                 original_x_for_vae_reconstruction = x_for_vae_encoder
