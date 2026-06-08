@@ -76,14 +76,9 @@ def get_view_subgraph_and_features(
     if global_indices_of_subset_in_batch.numel() == 0:
         return x_view_subset_batch, torch.empty((2,0), dtype=torch.long, device=device), None, global_indices_of_subset_in_batch
 
-    # Mapping từ global index sang local index (0, 1, 2, ...)
-    # Tạo map trên CPU để tăng tốc độ
-    global_to_local_idx_map = {global_idx.item(): local_idx for local_idx, global_idx in enumerate(global_indices_of_subset_in_batch.cpu())}
-
     src_nodes_global = view_full_edge_index[0]
     dst_nodes_global = view_full_edge_index[1]
 
-    # torch.isin hoạt động tốt nhất khi cả hai tensor trên cùng một device
     mask_src_in_subset = torch.isin(src_nodes_global, global_indices_of_subset_in_batch)
     mask_dst_in_subset = torch.isin(dst_nodes_global, global_indices_of_subset_in_batch)
     edge_selection_mask = mask_src_in_subset & mask_dst_in_subset
@@ -97,13 +92,16 @@ def get_view_subgraph_and_features(
 
     selected_edges_global_src = src_nodes_global[edge_selection_mask]
     selected_edges_global_dst = dst_nodes_global[edge_selection_mask]
-    
-    # Chuyển đổi từ global sang local indices
-    # Thực hiện trên CPU rồi chuyển lại GPU có thể nhanh hơn với dict lookup
-    local_edge_src_list = [global_to_local_idx_map[idx.item()] for idx in selected_edges_global_src.cpu()]
-    local_edge_dst_list = [global_to_local_idx_map[idx.item()] for idx in selected_edges_global_dst.cpu()]
 
-    local_edge_index_batch = torch.tensor([local_edge_src_list, local_edge_dst_list], dtype=torch.long, device=device)
+    max_global = int(global_indices_of_subset_in_batch.max().item()) + 1
+    global_to_local = torch.full((max_global,), -1, dtype=torch.long, device=device)
+    global_to_local[global_indices_of_subset_in_batch] = torch.arange(
+        global_indices_of_subset_in_batch.shape[0], device=device)
+
+    local_edge_index_batch = torch.stack([
+        global_to_local[selected_edges_global_src],
+        global_to_local[selected_edges_global_dst],
+    ], dim=0)
 
     local_edge_attr_batch = None
     if view_full_edge_attr is not None:
