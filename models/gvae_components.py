@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GATv2Conv, Linear, LayerNorm, BatchNorm
-from torch_scatter import scatter_add, scatter_max, scatter_mean
+from torch_scatter import scatter_add, scatter_max, scatter_mean, scatter_softmax
 from typing import Tuple, Optional
 
 
@@ -550,21 +550,10 @@ class RadiologyLesionAttentionAggregator(nn.Module):
         attn_input = torch.cat([relevant_lesion_features, context_per_lesion], dim=-1)
         attn_scores = self.attention_mlp(attn_input)  # [num_batch_edges, 1]
 
-        # 3. Apply softmax grouped by patient to get attention weights
-        attn_scores_max_per_patient = scatter_max(
-            attn_scores.squeeze(-1), batch_local_patient_indices, dim=0, dim_size=num_patients_in_batch)[0]
-        attn_scores_stabilized = attn_scores.squeeze(
-            -1) - attn_scores_max_per_patient[batch_local_patient_indices]
-
-        attn_exp = torch.exp(attn_scores_stabilized)
-        attn_exp_sum_per_patient = scatter_add(
-            attn_exp, batch_local_patient_indices, dim=0, dim_size=num_patients_in_batch)
-
-        attn_exp_sum_per_patient = attn_exp_sum_per_patient.clamp(min=1e-12)
-
-        # [num_batch_edges]
-        alpha = attn_exp / attn_exp_sum_per_patient[batch_local_patient_indices]
-        alpha = alpha.unsqueeze(-1)  # [num_batch_edges, 1]
+        # 3. Per-patient softmax over lesion attention scores (numerically stable internally)
+        alpha = scatter_softmax(
+            attn_scores.squeeze(-1), batch_local_patient_indices, dim=0
+        ).unsqueeze(-1)  # [num_batch_edges, 1]
 
         # 4. Calculate weighted sum of lesion features for each patient
         weighted_lesion_features = relevant_lesion_features * alpha
