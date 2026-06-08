@@ -74,3 +74,48 @@ def calculate_contrastive_loss(
                 num_contrastive_pairs_total += 1
 
     return total_contrastive_loss / num_contrastive_pairs_total if num_contrastive_pairs_total > 0 else torch.tensor(0.0, device=device)
+
+
+def calculate_contrastive_loss_vectorized(
+    sampled_zs_per_view_batch: Dict[str, Tuple[torch.Tensor, torch.Tensor]],
+    temperature: float
+) -> torch.Tensor:
+    embs, pidx = [], []
+    for _view, (e, gi) in sampled_zs_per_view_batch.items():
+        if e is not None and gi is not None and e.numel() > 0:
+            embs.append(e)
+            pidx.append(gi)
+    if not embs:
+        return torch.tensor(0.0)
+
+    E = torch.cat(embs, dim=0)
+    P = torch.cat(pidx, dim=0)
+    device = E.device
+    N = E.shape[0]
+    if N < 2:
+        return torch.tensor(0.0, device=device)
+
+    En = torch.nn.functional.normalize(E, p=2, dim=1)
+    sim = (En @ En.t()) / temperature
+
+    same_patient = P.unsqueeze(0) == P.unsqueeze(1)
+    upper = torch.triu(torch.ones(N, N, dtype=torch.bool, device=device), diagonal=1)
+    positives = same_patient & upper
+    negatives = ~same_patient
+
+    pair_rows, pair_cols = torch.where(positives)
+    if pair_rows.numel() == 0:
+        return torch.tensor(0.0, device=device)
+
+    losses = []
+    for a, p in zip(pair_rows.tolist(), pair_cols.tolist()):
+        neg_mask = negatives[a]
+        if neg_mask.sum() == 0:
+            continue
+        logits = torch.cat([sim[a, p].unsqueeze(0), sim[a][neg_mask]], dim=0)
+        target = torch.zeros(1, dtype=torch.long, device=device)
+        losses.append(torch.nn.functional.cross_entropy(logits.unsqueeze(0), target))
+
+    if not losses:
+        return torch.tensor(0.0, device=device)
+    return torch.stack(losses).mean()
