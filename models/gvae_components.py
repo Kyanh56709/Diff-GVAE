@@ -13,7 +13,8 @@ class ViewEncoder(nn.Module):
     """
 
     def __init__(self, in_channels: int, hidden_channels: int, latent_dim: int,
-                 heads: int = 4, dropout: float = 0.5, num_gnn_layers: int = 2, edge_dim: int = -1):
+                 heads: int = 4, dropout: float = 0.5, num_gnn_layers: int = 2, edge_dim: int = -1,
+                 logvar_clamp=None):
         """
         Args:
             in_channels: Dimensionality of input node features for this view.
@@ -23,6 +24,7 @@ class ViewEncoder(nn.Module):
             dropout: Dropout rate.
             num_gnn_layers: Number of GATv2Conv layers (supports 1 or 2).
             edge_dim: Dimensionality of edge features (-1 if no edge features).
+            logvar_clamp: Optional (min, max) tuple to clamp logvar values.
         """
         super().__init__()
         if num_gnn_layers not in [1, 2]:
@@ -31,11 +33,14 @@ class ViewEncoder(nn.Module):
 
         self.num_gnn_layers = num_gnn_layers
         self.dropout_p = dropout
+        self.logvar_clamp = logvar_clamp
+
         current_dim = hidden_channels
 
         self.conv1 = GATv2Conv(in_channels, hidden_channels, heads=heads, concat=True,
                                dropout=dropout, edge_dim=edge_dim, add_self_loops=True)
         self.bn1 = LayerNorm(hidden_channels * heads)
+        current_dim = hidden_channels * heads
 
         if num_gnn_layers > 1:
 
@@ -86,8 +91,8 @@ class ViewEncoder(nn.Module):
         # Output Projections
         mu = self.fc_mu(x)
         logvar = self.fc_logvar(x)
-        # logvar = torch.tanh(self.fc_logvar(x)) * 5.0
-        # logvar = F.hardtanh(self.fc_logvar(x), min_val=-6.0, max_val=2.0)
+        if self.logvar_clamp is not None:
+            logvar = torch.clamp(logvar, min=self.logvar_clamp[0], max=self.logvar_clamp[1])
         return mu, logvar
 
 # --- 2. Structure Decoder (Adjacency Reconstruction) ---

@@ -19,11 +19,15 @@ class GVAE (nn.Module):
                  fusion_config: Dict[str, Any],
                  classifier_config: Dict[str, Any],
                  d_embed: int,
-                 missing_strategy: str = 'zero'):
+                 missing_strategy: str = 'zero',
+                 logvar_clamp=None,
+                 radiology_zero_lesion_passthrough: bool = False):
         super().__init__()
         self.views = list(view_configs.keys())
         self.d_embed = d_embed
         self.missing_strategy = missing_strategy
+        self.logvar_clamp = logvar_clamp
+        self.radiology_zero_lesion_passthrough = radiology_zero_lesion_passthrough
 
         self.radiology_lesion_aggregator = None
         if 'radiology' in self.views and radiology_aggregator_config:
@@ -58,7 +62,8 @@ class GVAE (nn.Module):
                 config['in_channels'], config['hidden_channels_vae'], d_embed,
                 config.get('heads', 4), config.get('dropout', 0.3),
                 config.get('num_gnn_layers_vae', config.get('num_gnn_layers', 2)),
-                config.get('edge_dim', -1)
+                config.get('edge_dim', -1),
+                logvar_clamp=logvar_clamp
             )
             self.structure_decoders[view] = StructureDecoder()
             self.attribute_decoders[view] = AttributeDecoder(
