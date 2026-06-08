@@ -97,7 +97,8 @@ class GVAE (nn.Module):
         else:
             return mu
 
-    def forward(self, full_data: HeteroData, batch_patient_global_indices: torch.Tensor):
+    def forward(self, full_data: HeteroData, batch_patient_global_indices: torch.Tensor,
+                compute_structure: bool = True):
         device = batch_patient_global_indices.device
 
         vae_outputs_for_loss = {view: {} for view in self.views}
@@ -177,8 +178,8 @@ class GVAE (nn.Module):
                 vae_outputs_for_loss[view] = {
                     'mu': mu, 'logvar': logvar, 'z_sampled_for_dec': z_sampled,
                     'original_x_subset': original_x_for_vae_reconstruction,
-                    'original_adj_subset': get_dense_adj_for_reconstruction(local_patient_sim_edge_idx, num_nodes_for_vae, device),
-                    'rec_adj_logits': self.structure_decoders[view](z_sampled),
+                    'original_adj_subset': get_dense_adj_for_reconstruction(local_patient_sim_edge_idx, num_nodes_for_vae, device) if compute_structure else None,
+                    'rec_adj_logits': self.structure_decoders[view](z_sampled) if compute_structure else None,
                     'rec_x': self.attribute_decoders[view](z_sampled)
                 }
                 
@@ -229,7 +230,49 @@ class GVAE (nn.Module):
         }
 
         return logits, vae_outputs_for_loss, final_mus_projected_for_cl, fusion_attention
-    
+
+    @torch.no_grad()
+    def get_mus_only(self, full_data: HeteroData, batch_patient_global_indices: torch.Tensor):
+        self.eval()
+        device = batch_patient_global_indices.device
+        out = {}
+        for view in self.views:
+            x_patient_level_subset, local_eidx, local_eattr, global_sub = \
+                get_view_subgraph_and_features(full_data, view, batch_patient_global_indices)
+            if global_sub.numel() == 0:
+                out[view] = (None, global_sub)
+                continue
+
+            x_for_enc = None
+            if view == 'radiology' and self.radiology_lesion_aggregator:
+                ple = full_data['patient', 'has_lesion', 'lesion'].edge_index.to(device)
+                all_les = full_data['lesion'].x.to(device)
+                emask = torch.isin(ple[0], global_sub)
+                fe = ple[:, emask]
+                num_active = global_sub.shape[0]
+                if fe.numel() > 0:
+                    max_pi = ple[0].max().item() + 1
+                    g2l = torch.full((max_pi,), -1, dtype=torch.long, device=device)
+                    g2l[global_sub] = torch.arange(num_active, device=device)
+                    src_local = g2l[fe[0]]
+                    uniq, inv = torch.unique(fe[1], return_inverse=True)
+                    feats = all_les[uniq]
+                    e2 = torch.stack([src_local, inv], dim=0)
+                    x_for_enc = self.radiology_lesion_aggregator(feats, e2, num_active)
+                elif self.radiology_zero_lesion_passthrough:
+                    empty_e = torch.empty((2, 0), dtype=torch.long, device=device)
+                    empty_f = torch.zeros((0, all_les.shape[1]), dtype=all_les.dtype, device=device)
+                    x_for_enc = self.radiology_lesion_aggregator(empty_f, empty_e, num_active)
+            elif x_patient_level_subset is not None and x_patient_level_subset.numel() > 0:
+                x_for_enc = x_patient_level_subset
+
+            if x_for_enc is not None and x_for_enc.numel() > 0:
+                mu, _ = self.vae_encoders[view](x_for_enc, local_eidx, local_eattr)
+                out[view] = (mu, global_sub)
+            else:
+                out[view] = (None, global_sub)
+        return out
+
 
 @torch.no_grad()
 def get_separate_view_mus(
@@ -237,60 +280,26 @@ def get_separate_view_mus(
     full_data: HeteroData,
     indices: torch.Tensor
 ) -> Dict[str, torch.Tensor]:
-    """
-    Extracts separate mu vectors for each modality for a given batch of patients.
-
-    For patients missing a modality, the corresponding learnable 'missing embedding'
-    from the GVAE model is used as a placeholder.
-
-    Args:
-        gvae_model (GVAE): The pre-trained and frozen GVAE model.
-        full_data (HeteroData): The complete graph dataset.
-        indices (torch.Tensor): A tensor of global patient indices for the batch.
-
-    Returns:
-        Dict[str, torch.Tensor]: A dictionary where keys are view names (e.g., 'clinical')
-                                 and values are tensors of mu vectors of shape [batch_size, d_embed].
-    """
+    """Extracts per-view mu vectors for `indices`, filling missing views with the
+    model's missing embedding. Encoder-only (no decoders/fusion)."""
     gvae_model.eval()
     device = indices.device
     num_patients = len(indices)
     d_embed = gvae_model.d_embed
-    
-    # --- 1. Perform a single forward pass to get all available mu vectors ---
-    # The vae_outputs dictionary contains the computed mu vectors, but only for
-    # patients who actually have each view.
-    _, vae_outputs, _, _ = gvae_model(full_data, indices)
 
-    # --- 2. Create a mapping from global index to its position in the batch ---
-    # This is crucial for correctly placing the mu vectors.
-    global_to_batch_idx_map = {global_idx.item(): batch_idx 
-                               for batch_idx, global_idx in enumerate(indices)}
+    mus_by_view = gvae_model.get_mus_only(full_data, indices)
 
-    # --- 3. Initialize output dictionary and process each view ---
+    global_to_batch_idx_map = {g.item(): b for b, g in enumerate(indices)}
+
     all_mus = {}
     for view in gvae_model.views:
-        # a. Create a default tensor filled with the 'missing' embedding for this view.
-        # This will be the template we fill in.
         missing_embedding = gvae_model.missing_embeddings_params[view].expand(num_patients, d_embed)
         view_mus_tensor = missing_embedding.clone()
 
-        # b. Find which patients in this batch actually have this view.
-        # We re-use get_view_subgraph_and_features to get this list of indices.
-        _, _, _, global_indices_with_view = get_view_subgraph_and_features(full_data, view, indices)
-        
-        # c. If any patients have this view, get their mu vectors and place them.
-        if global_indices_with_view.numel() > 0 and vae_outputs[view].get('mu') is not None:
-            mus_for_this_view = vae_outputs[view]['mu']
-            
-            # Iterate through the patients that have the view
-            for i, global_idx in enumerate(global_indices_with_view):
-                # Find the patient's position (0, 1, 2...) within this specific batch
-                batch_idx = global_to_batch_idx_map[global_idx.item()]
-                
-                # Overwrite the 'missing' token with the actual computed mu vector
-                view_mus_tensor[batch_idx] = mus_for_this_view[i]
-        
+        mu, global_sub = mus_by_view.get(view, (None, None))
+        if mu is not None and global_sub is not None and global_sub.numel() > 0:
+            for i, g in enumerate(global_sub):
+                view_mus_tensor[global_to_batch_idx_map[g.item()]] = mu[i]
+
         all_mus[view] = view_mus_tensor
-        
     return all_mus
