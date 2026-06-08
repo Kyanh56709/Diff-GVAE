@@ -102,8 +102,11 @@ def kfold_train_gvae(
                  train_indices, 
                  model_config['radiology_aggregator_config'], 
                  device,
+                 epochs=train_config.get('pretrain_epochs', 400),
                  use_pos_weight=train_config.get('pretrain_use_pos_weight', False),
-                 pretrain_val_split=train_config.get('pretrain_val_split', 0.0)
+                 pretrain_val_split=train_config.get('pretrain_val_split', 0.0),
+                 patience=train_config.get('pretrain_patience', 30),
+                 seed=train_config.get('pretrain_seed', 42)
              )
 
         # -------------------------------------------------------
@@ -599,7 +602,9 @@ def pretrain_radiology_aggregator(
     device: torch.device,
     epochs: int = 400,
     use_pos_weight: bool = False,
-    pretrain_val_split: float = 0.0
+    pretrain_val_split: float = 0.0,
+    patience: int = 30,
+    seed: int = 42
 ) -> Dict[str, torch.Tensor]:
     """
     Pre-trains the radiology aggregator to classify response using only lesion data.
@@ -660,17 +665,38 @@ def pretrain_radiology_aggregator(
     else:
         criterion_none = nn.BCEWithLogitsLoss(reduction='none')
 
-    # 4. Optional held-out split (patient-level) for validation + early stopping
+    # 4. Optional STRATIFIED held-out split (patient-level) for validation + early stopping.
+    #    Stratifying by label keeps both classes in val (AUC is undefined otherwise) and
+    #    never empties a class from train. On the small radiology subset an unstratified
+    #    split easily lands 0 positives in val, making early stopping unreliable.
     n_active = len(active_patient_indices)
-    val_count = int(round(pretrain_val_split * n_active)) if pretrain_val_split > 0 else 0
-    perm = torch.randperm(n_active, device=device)
-    val_local = perm[:val_count]
-    train_local = perm[val_count:] if val_count > 0 else perm
+    gen = torch.Generator(device='cpu')
+    gen.manual_seed(seed)
+    if pretrain_val_split > 0:
+        labels_cpu = batch_labels.detach().cpu()
+        val_parts = []
+        for cls in (0.0, 1.0):
+            cls_local = torch.where(labels_cpu == cls)[0]
+            if cls_local.numel() == 0:
+                continue
+            n_cls_val = int(round(pretrain_val_split * cls_local.numel()))
+            # Keep at least one of this class in train; allow 0 in val if the class is tiny.
+            n_cls_val = max(0, min(n_cls_val, cls_local.numel() - 1))
+            if n_cls_val > 0:
+                shuffled = cls_local[torch.randperm(cls_local.numel(), generator=gen)]
+                val_parts.append(shuffled[:n_cls_val])
+        val_local = torch.cat(val_parts).to(device) if val_parts else torch.empty(0, dtype=torch.long, device=device)
+        train_mask = torch.ones(n_active, dtype=torch.bool, device=device)
+        train_mask[val_local] = False
+        train_local = torch.where(train_mask)[0]
+    else:
+        val_local = torch.empty(0, dtype=torch.long, device=device)
+        train_local = torch.arange(n_active, device=device)
+    val_count = val_local.numel()
 
-    best_val = float('inf')
+    best_val_auc = -1.0
     best_state = None
     no_improve = 0
-    patience = 50
 
     for epoch in range(1, epochs + 1):
         mil_model.train()
@@ -685,20 +711,26 @@ def pretrain_radiology_aggregator(
             mil_model.eval()
             with torch.no_grad():
                 val_logits = mil_model(batch_lesion_features, aggregator_edge_index, n_active)
-                val_loss = criterion_none(val_logits.squeeze(-1), batch_labels)[val_local].mean().item()
-            if val_loss < best_val:
-                best_val, best_state, no_improve = val_loss, copy.deepcopy(mil_model.state_dict()), 0
-            else:
-                no_improve += 1
-            if epoch % 50 == 0:
+                val_probs = torch.sigmoid(val_logits.squeeze(-1))[val_local].cpu().numpy()
+                val_true = batch_labels[val_local].cpu().numpy()
+            # Early stopping tracks val AUC (the quantity we care about). AUC is undefined
+            # if val collapses to one class; on those epochs we leave no_improve unchanged.
+            val_auc = None
+            if len(np.unique(val_true)) > 1:
                 try:
-                    auc = roc_auc_score(batch_labels[val_local].cpu().numpy(),
-                                        torch.sigmoid(val_logits.squeeze(-1))[val_local].cpu().numpy())
+                    val_auc = roc_auc_score(val_true, val_probs)
                 except Exception:
-                    auc = float('nan')
-                print(f"   [Pre-training] Ep {epoch}: train_loss={loss.item():.4f}, val_loss={val_loss:.4f}, val_AUC={auc:.4f}")
+                    val_auc = None
+            if val_auc is not None:
+                if val_auc > best_val_auc:
+                    best_val_auc, best_state, no_improve = val_auc, copy.deepcopy(mil_model.state_dict()), 0
+                else:
+                    no_improve += 1
+            if epoch % 50 == 0:
+                auc_str = f"{val_auc:.4f}" if val_auc is not None else "n/a"
+                print(f"   [Pre-training] Ep {epoch}: train_loss={loss.item():.4f}, val_AUC={auc_str} (best={best_val_auc:.4f})")
             if no_improve >= patience:
-                print(f"   [Pre-training] Early stop at epoch {epoch}.")
+                print(f"   [Pre-training] Early stop at epoch {epoch} (best val_AUC={best_val_auc:.4f}).")
                 break
         elif epoch % 50 == 0:
             with torch.no_grad():
@@ -714,3 +746,47 @@ def pretrain_radiology_aggregator(
 
     print("   [Pre-training] Complete. Extracting aggregator weights.")
     return mil_model.aggregator.state_dict()
+
+
+def sweep_pretrain_recipes(
+    full_data: HeteroData,
+    model_config: Dict,
+    train_config: Dict,
+    recipes: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Tuple[float, float]]:
+    """Compare radiology-pretraining recipes by the metric that actually matters:
+    DOWNSTREAM GVAE cross-validated val-AUC — NOT the pretrainer's own AUC.
+
+    Each recipe is a set of train_config overrides; this runs `kfold_train_gvae`
+    once per recipe and tabulates mean/std val-AUC.
+
+    Tip: this runs full k-fold per recipe. For a fast sweep, pass a `train_config`
+    with a small `n_splits` (e.g. 3) and `epochs` (e.g. 200) — you are comparing
+    recipes against each other, not producing final numbers.
+
+    Returns: {recipe_name: (mean_auc, std_auc)}.
+    """
+    if recipes is None:
+        recipes = {
+            '(a) no pretrain':           {'pretrain_epochs': 0},
+            '(b) 100 ep, no split':      {'pretrain_epochs': 100, 'pretrain_val_split': 0.0},
+            '(c) 400 ep, no split':      {'pretrain_epochs': 400, 'pretrain_val_split': 0.0},
+            '(d) val-split + earlystop': {'pretrain_epochs': 400, 'pretrain_val_split': 0.2},
+        }
+
+    results: Dict[str, Tuple[float, float]] = {}
+    for name, overrides in recipes.items():
+        print(f"\n{'#'*60}\n# RECIPE {name}: {overrides}\n{'#'*60}")
+        tc = copy.deepcopy(train_config)
+        tc.update(overrides)
+        summary, _, _ = kfold_train_gvae(full_data, model_config, tc)
+        results[name] = (summary.get('mean_auc', float('nan')),
+                         summary.get('std_auc', float('nan')))
+
+    print(f"\n{'='*60}\n PRETRAIN RECIPE COMPARISON (downstream GVAE val-AUC)\n{'='*60}")
+    print(f"  {'recipe':<28}{'mean_auc':>10}{'std_auc':>10}")
+    for name, (m, s) in results.items():
+        print(f"  {name:<28}{m:>10.4f}{s:>10.4f}")
+    best = max(results, key=lambda k: results[k][0] if results[k][0] == results[k][0] else -1)
+    print(f"\n  -> Best by downstream val-AUC: {best}")
+    return results
