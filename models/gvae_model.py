@@ -57,7 +57,8 @@ class GVAE (nn.Module):
             self.vae_encoders[view] = ViewEncoder(
                 config['in_channels'], config['hidden_channels_vae'], d_embed,
                 config.get('heads', 4), config.get('dropout', 0.3),
-                config.get('num_gnn_layers_vae', 2), config.get('edge_dim', -1)
+                config.get('num_gnn_layers_vae', config.get('num_gnn_layers', 2)),
+                config.get('edge_dim', -1)
             )
             self.structure_decoders[view] = StructureDecoder()
             self.attribute_decoders[view] = AttributeDecoder(
