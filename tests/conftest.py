@@ -1,7 +1,6 @@
 import torch
-import torch_geometric
-from torch_geometric.data import HeteroData
 import pytest
+from torch_geometric.data import HeteroData
 
 NUM_PATIENTS = 6
 CLINICAL_DIM = 22
@@ -40,7 +39,7 @@ def synthetic_data():
     # Patient 3: 1 lesion, Patient 4: 2 lesions, Patient 5: 1 lesion
     # (even-indexed get 2, odd-indexed get 1, except p2 which is edge case)
     lesion_patient_map = [0, 0, 1, 3, 4, 4, 5]
-    n_lesions = len(lesion_patient_map)  # = 6
+    n_lesions = len(lesion_patient_map)  # = 7
     x_lesion = torch.randn(n_lesions, LESION_DIM)
 
     # ── Patient-level node storage ──
