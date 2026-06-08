@@ -98,7 +98,8 @@ def kfold_train_gvae(
                  train_indices, 
                  model_config['radiology_aggregator_config'], 
                  device,
-                 use_pos_weight=train_config.get('pretrain_use_pos_weight', False)
+                 use_pos_weight=train_config.get('pretrain_use_pos_weight', False),
+                 pretrain_val_split=train_config.get('pretrain_val_split', 0.0)
              )
 
         # -------------------------------------------------------
@@ -589,7 +590,8 @@ def pretrain_radiology_aggregator(
     config: Dict[str, Any], 
     device: torch.device,
     epochs: int = 400,
-    use_pos_weight: bool = False
+    use_pos_weight: bool = False,
+    pretrain_val_split: float = 0.0
 ) -> Dict[str, torch.Tensor]:
     """
     Pre-trains the radiology aggregator to classify response using only lesion data.
@@ -646,29 +648,61 @@ def pretrain_radiology_aggregator(
         n_pos = batch_labels.sum()
         n_neg = batch_labels.numel() - n_pos
         pw = (n_neg / (n_pos + 1e-6)).clamp(min=1e-3).to(device)
-        criterion = nn.BCEWithLogitsLoss(pos_weight=pw)
+        criterion_none = nn.BCEWithLogitsLoss(pos_weight=pw, reduction='none')
     else:
-        criterion = nn.BCEWithLogitsLoss()
+        criterion_none = nn.BCEWithLogitsLoss(reduction='none')
 
-    # 4. Training Loop
+    # 4. Optional held-out split (patient-level) for validation + early stopping
+    n_active = len(active_patient_indices)
+    val_count = int(round(pretrain_val_split * n_active)) if pretrain_val_split > 0 else 0
+    perm = torch.randperm(n_active, device=device)
+    val_local = perm[:val_count]
+    train_local = perm[val_count:] if val_count > 0 else perm
+
+    best_val = float('inf')
+    best_state = None
+    no_improve = 0
+    patience = 50
+
     for epoch in range(1, epochs + 1):
         mil_model.train()
         optimizer.zero_grad()
-        
-        logits = mil_model(batch_lesion_features, aggregator_edge_index, len(active_patient_indices))
-        loss = criterion(logits.squeeze(), batch_labels)
-        
+        logits = mil_model(batch_lesion_features, aggregator_edge_index, n_active)
+        per_patient = criterion_none(logits.squeeze(-1), batch_labels)
+        loss = per_patient[train_local].mean()
         loss.backward()
         optimizer.step()
-        
-        if epoch % 50 == 0:
+
+        if val_count > 0:
+            mil_model.eval()
             with torch.no_grad():
-                probs = torch.sigmoid(logits.squeeze())
+                val_logits = mil_model(batch_lesion_features, aggregator_edge_index, n_active)
+                val_loss = criterion_none(val_logits.squeeze(-1), batch_labels)[val_local].mean().item()
+            if val_loss < best_val:
+                best_val, best_state, no_improve = val_loss, copy.deepcopy(mil_model.state_dict()), 0
+            else:
+                no_improve += 1
+            if epoch % 50 == 0:
+                try:
+                    auc = roc_auc_score(batch_labels[val_local].cpu().numpy(),
+                                        torch.sigmoid(val_logits.squeeze(-1))[val_local].cpu().numpy())
+                except Exception:
+                    auc = float('nan')
+                print(f"   [Pre-training] Ep {epoch}: train_loss={loss.item():.4f}, val_loss={val_loss:.4f}, val_AUC={auc:.4f}")
+            if no_improve >= patience:
+                print(f"   [Pre-training] Early stop at epoch {epoch}.")
+                break
+        elif epoch % 50 == 0:
+            with torch.no_grad():
+                probs = torch.sigmoid(logits.squeeze(-1))
                 try:
                     auc = roc_auc_score(batch_labels.cpu().numpy(), probs.cpu().numpy())
-                except:
+                except Exception:
                     auc = 0.5
-                print(f"   [Pre-training] Ep {epoch}: Loss={loss.item():.4f}, Train AUC={auc:.4f}")
+                print(f"   [Pre-training] Ep {epoch}: train_loss={loss.item():.4f}, TRAIN AUC={auc:.4f} (no val split)")
+
+    if best_state is not None:
+        mil_model.load_state_dict(best_state)
 
     print("   [Pre-training] Complete. Extracting aggregator weights.")
     return mil_model.aggregator.state_dict()
