@@ -14,7 +14,7 @@ from typing import Dict, Tuple, Optional, List, Any
 from torch_geometric.loader import NeighborLoader
 from models.gvae_model import GVAE
 from utils.training_utils import linear_anneal
-from utils.loss_utils import calculate_contrastive_loss
+from utils.loss_utils import calculate_contrastive_loss, calculate_contrastive_loss_vectorized
 from tqdm.notebook import tqdm
 import torch.optim as optim
 from models.gvae_components import StandaloneRadiologyMIL
@@ -70,6 +70,10 @@ def kfold_train_gvae(
     cl_params = anneal_config.get('cross_cl', {})
     kl_start_w, kl_end_e = kl_params.get('start_weight', base_w_kl), kl_params.get('end_epoch', 0)
     cl_start_w, cl_end_e = cl_params.get('start_weight', base_w_cross_cl), cl_params.get('end_epoch', 0)
+
+    use_vec_cl = train_config.get('vectorized_contrastive', False)
+    contrastive_fn = (calculate_contrastive_loss_vectorized
+                      if use_vec_cl else calculate_contrastive_loss)
 
     # --- Data Splitting ---
     all_indices_np = np.arange(full_multi_view_data['patient'].num_nodes)
@@ -146,7 +150,7 @@ def kfold_train_gvae(
                 
                 # 2. Contrastive Loss
                 if len(cl_out) > 0:
-                    loss_cl = calculate_contrastive_loss(cl_out, train_config['cross_cl_temp'])
+                    loss_cl = contrastive_fn(cl_out, train_config['cross_cl_temp'])
                 else:
                     loss_cl = torch.tensor(0.0, device=device)
                 
@@ -218,7 +222,7 @@ def kfold_train_gvae(
                 
                 # 2. Contrastive Loss
                 if len(val_cl_out) > 0:
-                    val_loss_cl = calculate_contrastive_loss(val_cl_out, train_config['cross_cl_temp'])
+                    val_loss_cl = contrastive_fn(val_cl_out, train_config['cross_cl_temp'])
                 else:
                     val_loss_cl = torch.tensor(0.0, device=device)
 
@@ -412,6 +416,10 @@ def train_gvae_single_fold(
     cl_start_e, cl_end_e = cl_params.get(
         'start_epoch', 0), cl_params.get('end_epoch', 0)
 
+    use_vec_cl_sf = train_config.get('vectorized_contrastive', False)
+    contrastive_fn_sf = (calculate_contrastive_loss_vectorized
+                         if use_vec_cl_sf else calculate_contrastive_loss)
+
     # --- 2. Training Loop Initialization ---
     best_val_auc = -1.0
     best_val_loss = float('inf')
@@ -445,7 +453,7 @@ def train_gvae_single_fold(
 
             # Calculate all loss components for training
             loss_class = criterion_bce_logits(logits.squeeze(), labels.float())
-            loss_cl = calculate_contrastive_loss(
+            loss_cl = contrastive_fn_sf(
                 cl_out, train_config['cross_cl_temp'])
 
             rec_attr, rec_struct, kl_div, active_views = 0.0, 0.0, 0.0, 0
@@ -509,7 +517,7 @@ def train_gvae_single_fold(
                 # Using final annealed weights for a stable target
                 val_loss_class = criterion_bce_logits(
                     val_logits.squeeze(), val_labels.float())
-                val_loss_cl = calculate_contrastive_loss(
+                val_loss_cl = contrastive_fn_sf(
                     val_cl_out, train_config['cross_cl_temp'])
 
                 val_rec_attr, val_rec_struct, val_kl, val_active_views = 0.0, 0.0, 0.0, 0
