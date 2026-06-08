@@ -186,15 +186,24 @@ def kfold_train_gvae(
                 avg_kl = kl_div / active_views_train if active_views_train > 0 else 0.0
                 
                 total_train_loss = (base_w_class * loss_class + w_cl * loss_cl + avg_rec_attr + avg_rec_struct + w_kl * avg_kl)
-                
+
+                # Skip the step on a non-finite loss instead of corrupting all params via backward.
+                if not torch.isfinite(total_train_loss):
+                    optimizer.zero_grad()
+                    continue
+
                 optimizer.zero_grad()
                 total_train_loss.backward()
                 nn.utils.clip_grad_norm_(model.parameters(), max_norm=train_config.get('grad_clip_norm', 1.0))
                 optimizer.step()
-                
+
                 batch_train_losses.append(total_train_loss.item())
-            
-            total_train_loss = torch.tensor(np.mean(batch_train_losses), device=device)
+
+            # Guard against an all-skipped epoch (np.mean([]) -> nan + warning).
+            if batch_train_losses:
+                total_train_loss = torch.tensor(np.mean(batch_train_losses), device=device)
+            else:
+                total_train_loss = torch.tensor(float('inf'), device=device)
 
             # =================== VALIDATION PHASE ===================
             model.eval()

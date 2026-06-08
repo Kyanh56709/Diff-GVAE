@@ -49,6 +49,7 @@ def synthetic_data():
     data['patient'].binary_label = y
     data['patient'].pathology_mask = pathology_mask
     data['patient'].radiology_mask = radiology_mask
+    data['patient'].num_nodes = NUM_PATIENTS
 
     # ── Lesion node storage ──
     data['lesion'].x = x_lesion
