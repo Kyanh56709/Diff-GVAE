@@ -77,8 +77,13 @@ These flags were added in the gvae-lesion-agg-fixes branch. All default to curre
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `pretrain_use_pos_weight` | `bool` | `False` | Class-weighted BCE loss in radiology pretraining. |
-| `pretrain_val_split` | `float` | `0.0` | Fraction of pretraining data held out for validation + early stopping. |
+| `pretrain_val_split` | `float` | `0.0` | Fraction held out (STRATIFIED by label) for pretrain validation + early stopping. |
+| `pretrain_epochs` | `int` | `400` | Number of radiology-aggregator pretraining epochs. Lower (e.g. 100) acts as a warm-start and curbs overfitting; `0` = no pretraining. |
+| `pretrain_patience` | `int` | `30` | Early-stopping patience (epochs without val-AUC improvement) when `pretrain_val_split > 0`. |
+| `pretrain_seed` | `int` | `42` | Seed for the stratified pretrain split. |
 | `vectorized_contrastive` | `bool` | `False` | Use vectorized InfoNCE implementation for contrastive loss. |
+
+**Recipe sweep:** `training.train_gvae.sweep_pretrain_recipes(full_data, model_config, train_config, recipes=None)` runs `kfold_train_gvae` once per recipe and ranks them by **downstream GVAE val-AUC** (the metric that matters — not the pretrainer's own AUC). Default recipes compare: no pretraining, 100ep, 400ep, and val-split+early-stop. Shrink `n_splits`/`epochs` in `train_config` for a fast sweep.
 
 ## Dependencies
 
