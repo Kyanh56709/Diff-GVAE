@@ -97,7 +97,8 @@ def kfold_train_gvae(
                  fold_data, 
                  train_indices, 
                  model_config['radiology_aggregator_config'], 
-                 device
+                 device,
+                 use_pos_weight=train_config.get('pretrain_use_pos_weight', False)
              )
 
         # -------------------------------------------------------
@@ -587,7 +588,8 @@ def pretrain_radiology_aggregator(
     train_indices: torch.Tensor, 
     config: Dict[str, Any], 
     device: torch.device,
-    epochs: int = 400
+    epochs: int = 400,
+    use_pos_weight: bool = False
 ) -> Dict[str, torch.Tensor]:
     """
     Pre-trains the radiology aggregator to classify response using only lesion data.
@@ -640,7 +642,13 @@ def pretrain_radiology_aggregator(
     # 3. Initialize Model
     mil_model = StandaloneRadiologyMIL(config).to(device)
     optimizer = optim.Adam(mil_model.parameters(), lr=1e-3, weight_decay=1e-4)
-    criterion = nn.BCEWithLogitsLoss()
+    if use_pos_weight:
+        n_pos = batch_labels.sum()
+        n_neg = batch_labels.numel() - n_pos
+        pw = (n_neg / (n_pos + 1e-6)).clamp(min=1e-3).to(device)
+        criterion = nn.BCEWithLogitsLoss(pos_weight=pw)
+    else:
+        criterion = nn.BCEWithLogitsLoss()
 
     # 4. Training Loop
     for epoch in range(1, epochs + 1):
