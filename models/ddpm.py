@@ -108,7 +108,7 @@ class ConditionalDDPM(nn.Module):
             # --- Optional: Dynamic Thresholding or Clamping ---
             # For StandardScaler, you don't typically need to clamp pred_x0 here,
             # but if you were using MinMaxScaler, this would be where you do it.
-            pred_x0.clamp_(-1., 1.)
+            # pred_x0.clamp_(-1., 1.)
 
             # 5. Calculate the posterior mean of q(x_{t-1} | x_t, x_0)
             # This formula is derived from the full posterior distribution and is more stable
