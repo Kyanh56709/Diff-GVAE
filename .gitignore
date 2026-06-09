@@ -21,6 +21,7 @@ wheels/
 *.egg
 
 # Virtual Environment
+.venv/
 venv/
 env/
 ENV/
@@ -57,4 +58,21 @@ Thumbs.db
 
 # Git worktrees
 .worktrees/
+
+# Scratch / temp scripts and dumps
+_*.py
+_*.txt
+cell_*.py
+notebook_cells/
+
+# Output / result directories
+coverage_density_results/
+docs/
+
+# Research / misc files
+*.png
+*.pdf
+*.xlsx
+nul
+image.png
 
