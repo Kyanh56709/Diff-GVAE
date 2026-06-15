@@ -186,7 +186,7 @@ class UnconditionalDDPM(nn.Module):
         xt, noise = self.forward_process(x0, t)
 
         # Predict the noise using the U-Net. Pass `y=None`.
-        predicted_noise = self.denoise_fn(xt, t_batch, y=None)
+        predicted_noise = self.denoise_fn(xt, t, y=None)
 
         return F.mse_loss(predicted_noise, noise)
 

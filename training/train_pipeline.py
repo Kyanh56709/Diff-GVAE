@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.model_selection import KFold
+from sklearn.preprocessing import StandardScaler
 import torch
 import torch.utils.data
 import torch.nn.functional as F
@@ -7,7 +8,6 @@ from sklearn.metrics import roc_auc_score, f1_score, accuracy_score, precision_s
 from typing import Dict, Any, List
 from models.gvae_model import GVAE
 from utils.data_utils import preprocess_fold_data_with_pca
-# from models.ddpm import UnconditionalDenoisingNetwork, UnconditionalDDPM
 from training.train_gvae import train_gvae_single_fold
 from training.train_ddpm import train_single_unconditional_ddpm
 from models.gvae_components import MuFusionTransformer
@@ -136,11 +136,21 @@ def kfold_gvae_ddpm_generative_classifier(
         with torch.no_grad():
             final_train_mus = fusion_transformer(stacked_mus_train)
 
+        # Use a single StandardScaler fitted on ALL training mus (both classes)
+        # This ensures both class DDPMs operate in the same scale domain
+        shared_scaler = StandardScaler()
+        final_train_mus_np = final_train_mus.cpu().numpy()
+        shared_scaler.fit(final_train_mus_np)
+
         mus_responder = final_train_mus[train_labels == 1]
         mus_non_responder = final_train_mus[train_labels == 0]
 
-        ddpm_responder, scaler_resp = train_single_unconditional_ddpm(mus_responder, ddpm_config, device)
-        ddpm_non_responder, scaler_non_resp = train_single_unconditional_ddpm(mus_non_responder, ddpm_config, device)
+        ddpm_responder, _ = train_single_unconditional_ddpm(
+            torch.tensor(shared_scaler.transform(mus_responder.cpu().numpy()), dtype=torch.float32).to(device),
+            ddpm_config, device)
+        ddpm_non_responder, _ = train_single_unconditional_ddpm(
+            torch.tensor(shared_scaler.transform(mus_non_responder.cpu().numpy()), dtype=torch.float32).to(device),
+            ddpm_config, device)
 
         if ddpm_responder is None or ddpm_non_responder is None:
             print(f"WARNING: DDPM training failed. Skipping fold.")
@@ -152,21 +162,21 @@ def kfold_gvae_ddpm_generative_classifier(
         
         with torch.no_grad():
             final_val_mus = fusion_transformer(stacked_mus_val)
-            
-        val_mus_scaled_for_resp = torch.tensor(scaler_resp.transform(final_val_mus.cpu().numpy()), dtype=torch.float32).to(device)
-        val_mus_scaled_for_non_resp = torch.tensor(scaler_non_resp.transform(final_val_mus.cpu().numpy()), dtype=torch.float32).to(device)
+        
+        # Use the SAME shared_scaler for evaluation (same scale domain for both classes)
+        final_val_mus_scaled = torch.tensor(
+            shared_scaler.transform(final_val_mus.cpu().numpy()), dtype=torch.float32).to(device)
         
         fold_probs = []
         timesteps_to_eval = torch.linspace(0, ddpm_config['timesteps'] - 1, 50, dtype=torch.long).to(device)
         
         with torch.no_grad():
-            for i in tqdm(range(len(final_val_mus)), desc="Evaluating", leave=False):
-                loss_resp = ddpm_responder.evaluation_loss(val_mus_scaled_for_resp[i].unsqueeze(0), timesteps_to_eval)
-                loss_non_resp = ddpm_non_responder.evaluation_loss(val_mus_scaled_for_non_resp[i].unsqueeze(0), timesteps_to_eval)
+            for i in tqdm(range(len(final_val_mus_scaled)), desc="Evaluating", leave=False):
+                loss_resp = ddpm_responder.evaluation_loss(final_val_mus_scaled[i].unsqueeze(0), timesteps_to_eval)
+                loss_non_resp = ddpm_non_responder.evaluation_loss(final_val_mus_scaled[i].unsqueeze(0), timesteps_to_eval)
                 
-                likelihood_resp = 1 / (loss_resp + 1e-9)
-                likelihood_non_resp = 1 / (loss_non_resp + 1e-9)
-                prob_is_responder = likelihood_resp / (likelihood_resp + likelihood_non_resp)
+                # Lower loss = better fit = more likely to belong to that class
+                prob_is_responder = 1.0 / (1.0 + torch.exp(loss_non_resp - loss_resp))
                 fold_probs.append(prob_is_responder.item())
         
         # --- Store results for this fold ---
