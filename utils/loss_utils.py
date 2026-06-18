@@ -16,10 +16,12 @@ def calculate_contrastive_loss(
     Returns:
         Contrastive loss scalar.
     """
+    device = torch.device("cpu")
     if sampled_zs_per_view_batch:
-        first_emb = list(sampled_zs_per_view_batch.values())[0][0]
-        if first_emb is not None:
-            device = first_emb.device
+        for first_emb, _ in sampled_zs_per_view_batch.values():
+            if first_emb is not None:
+                device = first_emb.device
+                break
 
     total_contrastive_loss = torch.tensor(0.0, device=device)
     num_contrastive_pairs_total = 0
@@ -80,13 +82,15 @@ def calculate_contrastive_loss_vectorized(
     sampled_zs_per_view_batch: Dict[str, Tuple[torch.Tensor, torch.Tensor]],
     temperature: float
 ) -> torch.Tensor:
+    device = torch.device("cpu")
     embs, pidx = [], []
     for _view, (e, gi) in sampled_zs_per_view_batch.items():
         if e is not None and gi is not None and e.numel() > 0:
+            device = e.device
             embs.append(e)
             pidx.append(gi)
     if not embs:
-        return torch.tensor(0.0)
+        return torch.tensor(0.0, device=device)
 
     E = torch.cat(embs, dim=0)
     P = torch.cat(pidx, dim=0)

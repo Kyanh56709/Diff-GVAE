@@ -177,11 +177,13 @@ class DenoiseUNet(nn.Module):
         t_emb = self.time_mlp(time)
         if self.is_conditional:
             # During training, apply classifier-free guidance dropout
+            labels = y
             if self.training and hasattr(self, 'cond_drop_prob') and self.cond_drop_prob > 0:
-                 mask = torch.rand(y.shape[0], device=y.device) < self.cond_drop_prob
-                 # Set masked labels to 0, the index for the unconditional token
-                 y[mask] = 0 
-            t_emb = t_emb + self.class_emb(y)
+                mask = torch.rand(y.shape[0], device=y.device) < self.cond_drop_prob
+                labels = y.clone()
+                # Set masked labels to 0, the index for the unconditional token.
+                labels[mask] = 0
+            t_emb = t_emb + self.class_emb(labels)
 
         # 3. Downsampling path
         skip_connections = []

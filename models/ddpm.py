@@ -2,12 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, reduce, repeat
-from tqdm.notebook import tqdm 
 import sys
 import math
 from models.unet import DenoiseUNet
 from typing import Optional
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 from itertools import combinations
 from typing import Optional, List, Tuple
 
@@ -186,7 +185,7 @@ class UnconditionalDDPM(nn.Module):
         xt, noise = self.forward_process(x0, t)
 
         # Predict the noise using the U-Net. Pass `y=None`.
-        predicted_noise = self.denoise_fn(xt, t_batch, y=None)
+        predicted_noise = self.denoise_fn(xt, t, y=None)
 
         return F.mse_loss(predicted_noise, noise)
 
@@ -228,7 +227,8 @@ class UnconditionalDDPM(nn.Module):
         return x
 
     @torch.no_grad()
-    def evaluation_loss(self, x0: torch.Tensor, timesteps_to_eval: torch.Tensor) -> torch.Tensor:
+    def evaluation_loss(self, x0: torch.Tensor, timesteps_to_eval: torch.Tensor,
+                        noise_seed: int = 0) -> torch.Tensor:
         """
         Calculates a stable, deterministic loss for evaluation purposes.
         Averages the MSE loss across a specified set of timesteps.
@@ -237,7 +237,12 @@ class UnconditionalDDPM(nn.Module):
         for t in timesteps_to_eval:
             t_batch = torch.full(
                 (x0.shape[0],), t, device=x0.device, dtype=torch.long)
-            xt, noise = self.forward_process(x0, t_batch)
+            generator = torch.Generator(device=x0.device)
+            generator.manual_seed(noise_seed + int(t.item()))
+            noise = torch.randn(
+                x0.shape, device=x0.device, dtype=x0.dtype, generator=generator
+            )
+            xt, noise = self.forward_process(x0, t_batch, noise=noise)
             predicted_noise = self.denoise_fn(xt, t_batch, y=None)
             total_loss += F.mse_loss(predicted_noise, noise)
 

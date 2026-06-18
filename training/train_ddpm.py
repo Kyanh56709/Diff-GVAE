@@ -126,7 +126,8 @@ def train_single_conditional_ddpm(
 def train_single_unconditional_ddpm(
     latents: torch.Tensor,
     ddpm_config: dict,
-    device: torch.device
+    device: torch.device,
+    scaler=None
 ) -> tuple[UnconditionalDDPM, MinMaxScaler]:
     """
     Trains a single UNCONDITIONAL DDPM on a specific set of latent vectors (one class).
@@ -136,9 +137,13 @@ def train_single_unconditional_ddpm(
             f"Warning: Not enough samples ({latents.shape[0]}) to train DDPM. Skipping.")
         return None, None
 
-    scaler = MinMaxScaler(feature_range=(-1, 1))
-    latents_scaled = torch.tensor(scaler.fit_transform(
-        latents.cpu().numpy()), dtype=torch.float32)
+    latents_np = latents.detach().cpu().numpy()
+    if scaler is None:
+        scaler = MinMaxScaler(feature_range=(-1, 1))
+        latents_scaled_np = scaler.fit_transform(latents_np)
+    else:
+        latents_scaled_np = scaler.transform(latents_np)
+    latents_scaled = torch.tensor(latents_scaled_np, dtype=torch.float32)
 
     dataset = torch.utils.data.TensorDataset(latents_scaled)
     dataloader = torch.utils.data.DataLoader(
@@ -147,7 +152,9 @@ def train_single_unconditional_ddpm(
 
     denoising_net = DenoiseUNet(
         latent_dim=ddpm_config['latent_dim'],
-        num_classes=None  # Báo cho UNet biết đây là model vô điều kiện
+        num_classes=None,  # Báo cho UNet biết đây là model vô điều kiện
+        dim_mults=tuple(ddpm_config.get('dim_mults', (1, 2, 4, 8))),
+        dropout_prob=ddpm_config.get('dropout_prob', 0.5),
     ).to(device)
 
     ddpm_model = UnconditionalDDPM(
@@ -157,7 +164,10 @@ def train_single_unconditional_ddpm(
     ).to(device)
 
     optimizer = torch.optim.AdamW(
-        ddpm_model.parameters(), lr=ddpm_config['lr'])
+        ddpm_model.parameters(),
+        lr=ddpm_config['lr'],
+        weight_decay=ddpm_config.get('weight_decay', 0.0),
+    )
     pbar = tqdm(range(ddpm_config['epochs']),
                 desc=f"Training Unconditional DDPM")
 
