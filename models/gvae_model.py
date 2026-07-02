@@ -131,7 +131,10 @@ class GVAE (nn.Module):
                 
                 if filtered_edges.numel() > 0:
                     # Map global patient indices to local batch indices (0, 1, 2, ...)
-                    max_patient_idx = patient_lesion_edges_all[0].max().item() + 1
+                    max_patient_idx = max(
+                        patient_lesion_edges_all[0].max().item(),
+                        global_indices_subset_patients.max().item(),
+                    ) + 1
                     global_to_local = torch.full((max_patient_idx,), -1, dtype=torch.long, device=device)
                     global_to_local[global_indices_subset_patients] = torch.arange(num_active_patients_for_view, device=device)
                     batch_lesion_src_patient_local_idx_t = global_to_local[filtered_edges[0]]
@@ -232,7 +235,8 @@ class GVAE (nn.Module):
         return logits, vae_outputs_for_loss, final_mus_projected_for_cl, fusion_attention
 
     @torch.no_grad()
-    def get_mus_only(self, full_data: HeteroData, batch_patient_global_indices: torch.Tensor):
+    def get_mus_only(self, full_data: HeteroData, batch_patient_global_indices: torch.Tensor,
+                     return_logvar: bool = False):
         self.eval()
         device = batch_patient_global_indices.device
         out = {}
@@ -240,7 +244,7 @@ class GVAE (nn.Module):
             x_patient_level_subset, local_eidx, local_eattr, global_sub = \
                 get_view_subgraph_and_features(full_data, view, batch_patient_global_indices)
             if global_sub.numel() == 0:
-                out[view] = (None, global_sub)
+                out[view] = (None, None, global_sub) if return_logvar else (None, global_sub)
                 continue
 
             x_for_enc = None
@@ -251,7 +255,7 @@ class GVAE (nn.Module):
                 fe = ple[:, emask]
                 num_active = global_sub.shape[0]
                 if fe.numel() > 0:
-                    max_pi = ple[0].max().item() + 1
+                    max_pi = max(ple[0].max().item(), global_sub.max().item()) + 1
                     g2l = torch.full((max_pi,), -1, dtype=torch.long, device=device)
                     g2l[global_sub] = torch.arange(num_active, device=device)
                     src_local = g2l[fe[0]]
@@ -267,10 +271,10 @@ class GVAE (nn.Module):
                 x_for_enc = x_patient_level_subset
 
             if x_for_enc is not None and x_for_enc.numel() > 0:
-                mu, _ = self.vae_encoders[view](x_for_enc, local_eidx, local_eattr)
-                out[view] = (mu, global_sub)
+                mu, logvar = self.vae_encoders[view](x_for_enc, local_eidx, local_eattr)
+                out[view] = (mu, logvar, global_sub) if return_logvar else (mu, global_sub)
             else:
-                out[view] = (None, global_sub)
+                out[view] = (None, None, global_sub) if return_logvar else (None, global_sub)
         return out
 
 
@@ -303,3 +307,47 @@ def get_separate_view_mus(
 
         all_mus[view] = view_mus_tensor
     return all_mus
+
+
+@torch.no_grad()
+def get_separate_view_latent_params(
+    gvae_model: GVAE,
+    full_data: HeteroData,
+    indices: torch.Tensor
+) -> Dict[str, Dict[str, torch.Tensor]]:
+    """Extract aligned per-view encoder parameters for DDPM inputs.
+
+    Missing views are filled with the model's missing embedding as `mu`, zero
+    log-variance, and mask=False. This is encoder-only and does not use
+    classifier logits/probabilities.
+    """
+    gvae_model.eval()
+    device = indices.device
+    num_patients = len(indices)
+    d_embed = gvae_model.d_embed
+
+    params_by_view = gvae_model.get_mus_only(full_data, indices, return_logvar=True)
+    global_to_batch_idx_map = {g.item(): b for b, g in enumerate(indices)}
+
+    all_params: Dict[str, Dict[str, torch.Tensor]] = {}
+    for view in gvae_model.views:
+        missing_embedding = gvae_model.missing_embeddings_params[view].expand(num_patients, d_embed)
+        view_mu = missing_embedding.clone()
+        view_logvar = torch.zeros(num_patients, d_embed, device=device, dtype=view_mu.dtype)
+        view_mask = torch.zeros(num_patients, device=device, dtype=torch.bool)
+
+        mu, logvar, global_sub = params_by_view.get(view, (None, None, None))
+        if mu is not None and logvar is not None and global_sub is not None and global_sub.numel() > 0:
+            for i, g in enumerate(global_sub):
+                batch_i = global_to_batch_idx_map[g.item()]
+                view_mu[batch_i] = mu[i]
+                view_logvar[batch_i] = logvar[i]
+                view_mask[batch_i] = True
+
+        all_params[view] = {
+            'mu': view_mu,
+            'logvar': view_logvar,
+            'mask': view_mask,
+        }
+
+    return all_params

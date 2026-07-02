@@ -429,6 +429,21 @@ class FusionAndClassifierHead(nn.Module):
             nn.Linear(int(classifier_hidden_dim), 1)  # Output là 1 logit duy nhất
         )
 
+    def fuse(self, view_embeddings_stacked: torch.Tensor) -> torch.Tensor:
+        """Return the fused CLS representation before the classifier head."""
+        batch_size = view_embeddings_stacked.shape[0]
+
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+        x = torch.cat((cls_tokens, view_embeddings_stacked), dim=1)
+
+        attn_output, _ = self.mha(x, x, x)
+        x = self.norm1(x + attn_output)
+
+        ffn_output = self.ffn(x)
+        x = self.norm2(x + ffn_output)
+
+        return x[:, 0, :]
+
     def forward(self, view_embeddings_stacked: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Args:
@@ -439,20 +454,8 @@ class FusionAndClassifierHead(nn.Module):
             logits: The final classification logits, shape [batch_size, 1].
             attention_weights: None.
         """
-        batch_size = view_embeddings_stacked.shape[0]
-
         # --- 1. Fusion using Transformer Block ---
-        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
-        x = torch.cat((cls_tokens, view_embeddings_stacked), dim=1)
-
-        attn_output, _ = self.mha(x, x, x)
-        x = self.norm1(x + attn_output)
-
-        ffn_output = self.ffn(x)
-        x = self.norm2(x + ffn_output)
-
-        # Lấy biểu diễn tổng hợp từ [CLS] token
-        cls_output = x[:, 0, :]  # Shape: [batch_size, embed_dim]
+        cls_output = self.fuse(view_embeddings_stacked)
 
         # --- 2. Classification ---
         logits = self.classifier_head(cls_output)
