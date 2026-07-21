@@ -1,3 +1,5 @@
+# DEPRECATED — DDPM-as-classifier path. Kept for reference only; NOT part of
+# the maintained pipeline and not expected to run. See deprecated/README.md.
 from __future__ import annotations
 
 import copy

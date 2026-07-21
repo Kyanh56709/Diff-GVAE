@@ -1,3 +1,5 @@
+# DEPRECATED — DDPM-as-classifier path. Kept for reference only; NOT part of
+# the maintained pipeline and not expected to run. See deprecated/README.md.
 import csv
 import json
 import random
@@ -18,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from training.train_pipeline import kfold_gvae_ddpm_generative_classifier
+from deprecated.train_pipeline import kfold_gvae_ddpm_generative_classifier
 
 
 def json_ready(value):

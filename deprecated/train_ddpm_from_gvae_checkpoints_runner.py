@@ -1,3 +1,5 @@
+# DEPRECATED — DDPM-as-classifier path. Kept for reference only; NOT part of
+# the maintained pipeline and not expected to run. See deprecated/README.md.
 import argparse
 import csv
 import json
@@ -22,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from training.train_pipeline import (  # noqa: E402
+from deprecated.train_pipeline import (  # noqa: E402
     _evaluate_gvae_candidate_with_ddpm,
     _prepare_artifact_path,
 )
