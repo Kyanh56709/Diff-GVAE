@@ -9,3 +9,5 @@ matplotlib
 wandb
 einops
 seaborn
+scipy
+umap-learn
