@@ -1,3 +1,7 @@
+# DEPRECATED convenience script. The maintained entry point is
+# outputs/gvae/train_gvae_runner.py (CLI flags, top-k checkpointing). This
+# script now defaults to checkpoint_metric/early_stopping_metric =
+# "latent_quality" to match that runner.
 import torch
 from training.train_gvae import kfold_train_gvae
 
@@ -72,8 +76,8 @@ train_config = {
     "print_every_k_epochs": 10,
     "random_seed": 42,
     "save_best_fold_model": True,
-    "checkpoint_metric": "auc_pr_balanced_accuracy",
-    "early_stopping_metric": "auc_pr_balanced_accuracy",
+    "checkpoint_metric": "latent_quality",
+    "early_stopping_metric": "latent_quality",
     "checkpoint_dir": "outputs/gvae/checkpoints/manual_run",
     "metrics_dir": "outputs/gvae/metrics/manual_run",
     "classification_threshold_selection_metric": "balanced_accuracy",

@@ -1,3 +1,5 @@
+# This is the maintained GVAE runner. run_gvae.py in the repo root is a
+# thin deprecated convenience script kept only for quick interactive runs.
 import argparse
 import json
 import random
