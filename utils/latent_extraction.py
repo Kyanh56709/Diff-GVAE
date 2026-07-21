@@ -283,6 +283,30 @@ def extract_latents_for_ddpm(
     return artifact_path
 
 
+_RECOMMENDED_LATENT_KEYS = {
+    'concat_mu',
+    'stacked_mu',
+    'fused_cls_mu',
+    'concat_z',
+    'stacked_z',
+}
+
+
+def _validate_ddpm_latent_key(latent_key, available_keys, allow_non_concat_mu):
+    """Enforce the DDPM latent contract: concat_mu by default; any other key
+    (notably the supervised `fused_cls_mu`) must be explicitly opted into so a
+    supervised representation cannot silently leak into the DDPM path."""
+    if latent_key not in available_keys:
+        raise ValueError(
+            f"Unknown latent_key '{latent_key}'. Choose one of {sorted(available_keys)}."
+        )
+    if latent_key != 'concat_mu' and not allow_non_concat_mu:
+        raise ValueError(
+            f"latent_key='{latent_key}' is not the recommended 'concat_mu'. "
+            f"Pass allow_non_concat_mu=True to opt in explicitly."
+        )
+
+
 def extract_recommended_latents_for_ddpm(
     checkpoint_path: str | Path,
     full_data: HeteroData,
@@ -292,6 +316,7 @@ def extract_recommended_latents_for_ddpm(
     sample_seed: int = 0,
     overwrite: bool = False,
     latent_key: str = 'concat_mu',
+    allow_non_concat_mu: bool = False,
     extraction_config: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """Export the recommended DDPM latent representation as split files.
@@ -325,18 +350,7 @@ def extract_recommended_latents_for_ddpm(
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
-    available_latent_keys = {
-        'concat_mu',
-        'stacked_mu',
-        'fused_cls_mu',
-        'concat_z',
-        'stacked_z',
-    }
-    if latent_key not in available_latent_keys:
-        raise ValueError(
-            f"Unknown latent_key '{latent_key}'. "
-            f"Choose one of {sorted(available_latent_keys)}."
-        )
+    _validate_ddpm_latent_key(latent_key, _RECOMMENDED_LATENT_KEYS, allow_non_concat_mu)
 
     extraction_dir = _default_extraction_dir(
         checkpoint,
@@ -351,6 +365,7 @@ def extract_recommended_latents_for_ddpm(
         'latent_key': latent_key,
         'primary_recommended_ddpm_input': 'concat_mu',
         'classifier_head_used_as_ddpm_input': False,
+        'allow_non_concat_mu': allow_non_concat_mu,
         'output_dir': str(extraction_dir),
         'splits': {},
         'files': {
