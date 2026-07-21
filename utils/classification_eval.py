@@ -215,6 +215,11 @@ def build_binary_classification_diagnostics(
     metadata: Optional[Dict[str, Any]] = None,
     probability_note: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """Build a comprehensive binary-classification diagnostics payload.
+
+    The returned "threshold_metric_caveat" documents that *_best_threshold
+    metrics are optimistic (threshold chosen on the reported split).
+    """
     labels = np.asarray(labels).astype(int)
     scores = np.asarray(scores, dtype=float)
     metrics_0_5, cm_0_5 = metrics_at_threshold(labels, scores, 0.5)
@@ -263,6 +268,11 @@ def build_binary_classification_diagnostics(
         "pr_auc_baseline_positive_prevalence": prevalence,
         "normalized_average_precision": normalized_ap,
         "probability_note": probability_note,
+        "threshold_metric_caveat": (
+            "best-threshold F1/balanced_accuracy are selected on the SAME split "
+            "they are reported on and are therefore optimistic; prefer roc_auc / "
+            "pr_auc as the headline metrics."
+        ),
     }
 
 
