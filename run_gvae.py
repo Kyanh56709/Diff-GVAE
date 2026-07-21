@@ -5,6 +5,8 @@
 import torch
 from training.train_gvae import kfold_train_gvae
 
+# Canonical data file is data_ln_pc_ihc_g.pt (clinical dim 22, labels {0:62,1:185}).
+# Do NOT swap in deprecated/data_247.pt: it has inverted labels and 64 clinical cols.
 data = torch.load("data_ln_pc_ihc_g.pt", map_location="cpu")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
