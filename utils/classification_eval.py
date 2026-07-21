@@ -100,7 +100,9 @@ def metrics_at_threshold(
 ) -> Tuple[Dict[str, float], Dict[str, Any]]:
     labels = np.asarray(labels).astype(int)
     scores = np.asarray(scores, dtype=float)
-    preds = (scores > threshold).astype(int)
+    # score == threshold counts as positive (>=): matches p>=0.5 -> positive
+    # convention and sklearn operating-point semantics. Changed from `>`.
+    preds = (scores >= threshold).astype(int)
     cm = confusion_matrix_dict(labels, preds)
     tn, fp, fn, tp = cm["tn"], cm["fp"], cm["fn"], cm["tp"]
     specificity = tn / (tn + fp) if (tn + fp) else np.nan
