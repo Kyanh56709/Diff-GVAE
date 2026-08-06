@@ -13,7 +13,7 @@ All DOIs/PMIDs below were resolved or verified during session 2026-08-06 unless 
 | Paper | DOI / PMID | Data availability (verified) |
 |---|---|---|
 | The EU-funded I3LUNG Project: Integrative Science, Intelligent Data Platform for Individualized LUNG Cancer Care With Immunotherapy. Clin Lung Cancer 2023 | 10.1016/j.cllc.2023.02.005 / PMID 36959048 | Protocol; trial NCT05537922 (verified PMID→title/DOI mapping via PubMed esummary). |
-| I3LUNG: Clinical Validation of a Multimodal AI Tool to Support Immunotherapy Decisions in NSCLC. medRxiv preprint 2026 | 10.64898/2026.01.16.25342913 | Preprint URL verified HTTP 200: https://www.medrxiv.org/content/10.64898/2026.01.16.25342913v1. Abstract: 2,365 patients enrolled, 6 centers, RWD clinical + CT + digital pathology + genomics, MLEF/DLIF fusion, AUC≈0.74 (test) / 0.82 first-line. |
+| I3LUNG: Clinical Validation of a Multimodal AI Tool to Support Immunotherapy Decisions in NSCLC. medRxiv preprint 2026 (DOI = Zenodo record 17535424's own DOI, per zenodo_rec_17535424.json) | 10.64898/2026.01.16.25342913 | Abstract (from record): 2,365 patients enrolled, 6 centers, RWD clinical + CT + digital pathology + genomics, MLEF/DLIF fusion, AUC≈0.74 (test) / 0.82 first-line. NOTE (review 2026-08-06): the "HTTP 200" claim had no saved fetch artifact — reclassified as unverified; the DOI resolves to the Zenodo record itself. |
 | Dataset release: **I3LUNG DATASETS**, Zenodo record 17535424 | https://zenodo.org/records/17535424 | I3LUNG_DATA.zip (26 MB) + results.zip (2.08 GB), CC-BY-NC-4.0. Contents downloaded and inspected this session (see datasets.md #1). |
 
 ## cBioPortal-hosted ICI cohorts

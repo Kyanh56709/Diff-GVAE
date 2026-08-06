@@ -56,7 +56,7 @@ Network notes (same as previous session): TCIA website/API and Synapse unreachab
 - **Download**: `curl -L -o I3LUNG_DATA.zip https://zenodo.org/api/records/17535424/files/I3LUNG_DATA.zip/content` (26 MB; `results.zip` 2.08 GB optional).
 - **Fit tier: S** (clinical view maps nearly 1:1; pyradiomics ≈ project's radiology view; pathology = FM embeddings, needs extractor swap).
 - **Blockers**: non-commercial license; features only (no raw CT/WSI); radiology per-patient not per-lesion; pathology WSI-level embeddings not GLCM.
-- **Verification**: record API + full zip download + column/row inspection + label-consistency check, this session. Related: protocol PMID 36959048; validation preprint DOI 10.64898/2026.01.16.25342913 (HTTP 200).
+- **Verification**: record API + full zip download + column/row inspection + label-consistency check, this session. Related: protocol PMID 36959048; validation preprint DOI 10.64898/2026.01.16.25342913 (Zenodo record's own DOI — see papers.md; HTTP-200 check not saved as artifact, per review).
 
 ### 2. cBioPortal `lung_msk_mind_2020` — Vanguri et al. 2022 cohort — **NSCLC: Yes — EXCLUDED (same cohort as project, owner 2026-08-06)**
 - **Description**: Genomic/clinical component of the project's own source cohort (MSK MIND; 247 advanced NSCLC on PD-(L)1; Nature Cancer 2022).
@@ -222,7 +222,7 @@ Network notes (same as previous session): TCIA website/API and Synapse unreachab
 ## Tier C
 
 ### 19. TCIA classic NSCLC radiomics cohorts — **NSCLC: Yes** (unchanged)
-- NSCLC-Radiomics (Aerts 2014, ~422), NSCLC-Radiogenomics (Bakr 2018, ~211, +RNA-seq), NSCLC-Radiomics-Interobserver1, NSCLC-RADIOMICS-GENOMICS (89), Lung-PET-CT-Dx, QIN-Lung-CT, 4D-Lung. None ICI-treated; no RECIST-ICI labels. Fit C (pretraining only).
+- NSCLC-Radiomics (Aerts 2014, ~422), NSCLC-Radiogenomics (Bakr 2018, ~211, +RNA-seq), NSCLC-Radiomics-Interobserver1, NSCLC-RADIOMICS-GENOMICS (89), Lung-PET-CT-Dx, 4D-Lung. None ICI-treated; no RECIST-ICI labels. Fit C (pretraining only). (QIN-Lung-CT listed by name but NOT present in the saved Wayback collection listing — unverified, per review; excluded from the list.)
 
 ### 20. Jerby-Arnon et al. 2018 — GEO GSE115821 — **NSCLC: No (melanoma)**
 - **Description**: "A Cancer Cell Program Promotes T Cell Exclusion and Resistance to PD-1 Blockade" (Cell 2018); melanoma biopsies pre-ICI: anti-PD-1 27, anti-CTLA-4 6, combination 4 (of 37 samples).
