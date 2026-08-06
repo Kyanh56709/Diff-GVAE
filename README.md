@@ -8,9 +8,9 @@
   `{0: 62, 1: 185}`.
 - The old `data/data_247.pt` had **inverted `binary_label`** and 64 clinical
   columns; it has been moved to `deprecated/data_247.pt`. Do not train on it.
-- **Positive-class meaning — OWNER TO CONFIRM:** `binary_label = 1` is assumed
-  to mean *responder* (the 185/247 majority). This cannot be derived from the
-  data and must be confirmed against the source cohort before any result is
-  reported. If it is instead non-responder, every reported metric's clinical
-  interpretation flips.
+- **Positive-class meaning (confirmed 2026-08-06):** `binary_label = 1` =
+  **non-responder (185/247)**; `binary_label = 0` = **responder (62/247)**.
+  Metrics are computed with class 1 as positive; for responder-framed
+  reporting of PR-AUC/F1/sensitivity/specificity, flip labels (1-y) or
+  reinterpret.
 - Validate any graph before training: `python review_fixes_2026_07/data_validation.py data_ln_pc_ihc_g.pt`.

@@ -173,6 +173,7 @@ The comparison between GVAE and downstream classifiers is useful but not perfect
 - ROC AUC measures rank separation of predicted scores.
 - PR AUC is more informative for imbalanced response labels.
 - F1, balanced accuracy, sensitivity, and specificity depend on a decision threshold.
+- Positive class is label 1 = non-responder (confirmed 2026-08-06). ROC-AUC is flip-invariant, but PR-AUC, F1, sensitivity, and specificity are NOT; flip labels (1-y) for responder-framed reporting.
 - MMD, mean distance, covariance distance, and kNN distance describe synthetic latent distribution quality; they are not clinical prediction metrics.
 
 Latest runnable results already present in outputs:
@@ -265,7 +266,7 @@ Known artifact issue: older generated output directories contain long checkpoint
 
 | Severity | File/path | Function/class | What is wrong | Why it matters |
 |---|---|---|---|---|
-| High | `data_ln_pc_ihc_g.pt`, `data/data_247.pt` | Serialized data | The two graph files have opposite binary label polarity: `data_ln_pc_ihc_g.pt` has `{0:62, 1:185}`, while `data/data_247.pt` has `{0:185, 1:62}`. | Switching data files can invert responder/non-responder meaning and invalidate metrics. |
+| High | `data_ln_pc_ihc_g.pt`, `data/data_247.pt` | Serialized data | The two graph files have opposite binary label polarity. Confirmed semantics (2026-08-06): canonical `data_ln_pc_ihc_g.pt` has `{0:62 responders, 1:185 non-responders}`; `deprecated/data_247.pt` has `{0:185, 1:62}` = inverted balance. `configs/data_247.pt` (64-dim clinical, same polarity as canonical) is not yet quarantined. | Switching data files can invert responder/non-responder meaning and invalidate metrics. |
 | High | Repository data preprocessing | Missing graph build script | No raw-to-`HeteroData` graph construction code was found. Similarity edges, masks, and preprocessing cannot be fully audited. | Data leakage in graph construction cannot be ruled out from source alone. |
 | High | `training/train_pipeline.py:589` | `_evaluate_gvae_candidate_with_ddpm` | Deprecated path treats DDPM denoising loss as a classifier score when opt-in is enabled. | Violates the intended design that DDPM is not a predictor. |
 | Medium | `outputs/gvae/train_gvae_ddpm_runner.py:222` | Runner config | Explicitly enables `allow_deprecated_ddpm_classifier=True`. | Easy to run an obsolete experiment and report DDPM as classifier. |
@@ -288,7 +289,7 @@ Known artifact issue: older generated output directories contain long checkpoint
 
 1. Critical correctness bugs
 
-- Decide and document the positive-class meaning for response labels.
+- **Resolved (confirmed 2026-08-06):** positive class is `binary_label = 1` = non-responder (185/247); `binary_label = 0` = responder (62/247). Remaining action: update reporting code/docs to flip labels (1-y) for responder-framed metrics.
 - Remove or quarantine `data/data_247.pt` unless its label polarity is corrected and documented.
 - Add a data validation script that checks feature dimensions, label polarity, masks, class counts, and edge types before training.
 
@@ -335,3 +336,4 @@ Known artifact issue: older generated output directories contain long checkpoint
 14. Train downstream classifier only on train real latents or train real+synthetic latents.
 15. Evaluate downstream classifier on held-out fold only.
 16. Report GVAE direct prediction metrics separately from DDPM augmentation downstream metrics, and never report DDPM itself as a response predictor.
+17. State the positive class (label 1 = non-responder, confirmed 2026-08-06); flip labels (1-y) before responder-oriented threshold metrics.
