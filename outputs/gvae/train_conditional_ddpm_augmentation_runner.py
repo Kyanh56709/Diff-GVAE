@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import json
 import random
@@ -43,6 +45,25 @@ def latest_gvae_run_id(checkpoint_root: Path) -> str:
     if not run_dirs:
         raise FileNotFoundError(f"No GVAE checkpoint runs found under {checkpoint_root}")
     return sorted(run_dirs, key=lambda path: path.stat().st_mtime)[-1].name
+
+
+def _resolve_gvae_run_id(gvae_run_id: str | None, checkpoint_root: Path) -> str:
+    """Return the GVAE run id, warning on stderr when auto-selected.
+
+    When ``--gvae-run-id`` is omitted the latest run by directory mtime is
+    used; emit a WARNING on stderr so the implicit choice is visible in
+    downstream logs (stdout is reserved for machine-readable output).
+    """
+    if gvae_run_id:
+        return gvae_run_id
+    run_id = latest_gvae_run_id(checkpoint_root)
+    print(
+        "WARNING: no --gvae-run-id given; using latest run by directory "
+        f"mtime: {run_id}",
+        file=sys.stderr,
+        flush=True,
+    )
+    return run_id
 
 
 def fold_from_checkpoint(path: Path) -> int:
@@ -113,7 +134,8 @@ def main():
     parser.add_argument(
         "--augmentation-modes",
         default="both_classes",
-        help="Comma-separated: minority_only,responder_only,both_classes",
+        help="Comma-separated: minority_only,nonresponder_only,both_classes "
+             "(responder_only deprecated: generates class 1 = NON-responders)",
     )
     parser.add_argument("--filter-synthetic", action="store_true")
     parser.add_argument("--filter-quantile", type=float, default=0.95)
@@ -141,7 +163,7 @@ def main():
         torch.cuda.manual_seed_all(seed)
 
     checkpoint_root = Path(args.checkpoint_root)
-    gvae_run_id = args.gvae_run_id or latest_gvae_run_id(checkpoint_root)
+    gvae_run_id = _resolve_gvae_run_id(args.gvae_run_id, checkpoint_root)
     checkpoint_paths = discover_checkpoints(
         checkpoint_root=checkpoint_root,
         gvae_run_id=gvae_run_id,

@@ -285,6 +285,55 @@ def _checkpoint_sort_key(candidate: Dict[str, Any], metric: str) -> Tuple[float,
     raise ValueError(f"Unknown checkpoint metric: {metric}")
 
 
+def _checkpoint_metric_label_and_value(
+    candidate: Dict[str, Any],
+    metric: str,
+) -> Tuple[str, float]:
+    """Return (filename label, numeric value) for the checkpoint metric.
+
+    Mirrors the primary sort key of ``_checkpoint_sort_key`` so the
+    checkpoint filename suffix reflects the metric actually used for
+    ranking (e.g. ``latent_quality_0.7312`` instead of ``auc_0.7312``).
+    """
+    diagnostics = candidate.get('validation_diagnostics') or {}
+    metrics_0_5 = diagnostics.get('threshold_0_5_metrics') or {}
+    best_metrics = diagnostics.get('best_threshold_metrics') or {}
+    latent_quality = candidate.get('latent_quality_metrics') or {}
+    val_auc = candidate.get('val_auc', metrics_0_5.get('auc', float('-inf')))
+    val_pr_auc = candidate.get(
+        'val_pr_auc',
+        metrics_0_5.get('pr_auc', float('-inf')),
+    )
+    val_balanced_accuracy = candidate.get(
+        'val_balanced_accuracy',
+        best_metrics.get('balanced_accuracy', float('-inf')),
+    )
+    val_f1 = candidate.get('val_f1', best_metrics.get('f1', float('-inf')))
+    val_loss = candidate.get('val_loss', float('inf'))
+
+    if metric in {'latent_quality', 'latent_quality_score'}:
+        return 'latent_quality', _safe_metric_value(
+            latent_quality.get('latent_quality_score'),
+        )
+    if metric in {'latent_linear_probe_auc', 'linear_probe_auc'}:
+        return 'latent_linear_probe_auc', _safe_metric_value(
+            latent_quality.get('linear_probe_auc'),
+        )
+    if metric in {'auc', 'roc_auc'}:
+        return 'auc', val_auc
+    if metric == 'pr_auc':
+        return 'pr_auc', val_pr_auc
+    if metric == 'balanced_accuracy':
+        return 'balanced_accuracy', val_balanced_accuracy
+    if metric == 'f1':
+        return 'f1', val_f1
+    if metric == 'loss':
+        return 'loss', val_loss
+    if metric in {'auc_pr_balanced_accuracy', 'auc_pr_balanced'}:
+        return 'auc_pr_balanced', val_auc
+    raise ValueError(f"Unknown checkpoint metric: {metric}")
+
+
 def _compute_main_pos_weight(
     train_labels_np: np.ndarray,
     train_config: Dict[str, Any],
@@ -322,6 +371,37 @@ def _compute_main_pos_weight(
         'balanced_batch_sampling': use_balanced_batches,
     }
     return float(pos_weight), metadata
+
+
+def _resolve_clinical_indices(
+    train_config: Dict[str, Any],
+    clinical_dim: int,
+    device: torch.device,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Resolve continuous/binary clinical feature index tensors.
+
+    Honors the optional train_config keys ``clinical_cont_indices`` and
+    ``clinical_bin_indices`` (each a sequence of ints, independently
+    optional).  A missing key falls back to the canonical clinical layout:
+    continuous columns 0..4 and binary columns 5..21, clamped to
+    ``clinical_dim``.  For 22-column clinical features the fallback
+    reproduces the historical hardcoded indices exactly.
+    """
+    n_cont = min(5, clinical_dim)
+    n_bin = min(22, clinical_dim)
+    cont = train_config.get('clinical_cont_indices')
+    bin_ = train_config.get('clinical_bin_indices')
+    cont_idx = torch.tensor(
+        list(range(0, n_cont)) if cont is None else list(cont),
+        dtype=torch.long,
+        device=device,
+    )
+    bin_idx = torch.tensor(
+        list(range(5, n_bin)) if bin_ is None else list(bin_),
+        dtype=torch.long,
+        device=device,
+    )
+    return cont_idx, bin_idx
 
 
 def _make_train_batches(
@@ -496,8 +576,10 @@ def kfold_train_gvae(
     full_multi_view_data_cpu = full_multi_view_data.clone().cpu()
 
     # --- Define Feature Indices for Clinical View ---
-    clinical_cont_idx = torch.arange(0, 5, device=device)
-    clinical_bin_idx = torch.arange(5, 22, device=device) 
+    clinical_dim = full_multi_view_data_cpu['patient'].x_clinical.shape[1]
+    clinical_cont_idx, clinical_bin_idx = _resolve_clinical_indices(
+        train_config, clinical_dim, device
+    )
     
     criterion_mse = nn.MSELoss()
     
@@ -1024,11 +1106,14 @@ def kfold_train_gvae(
                 }, checkpoint_path)
 
                 if top_checkpoint_candidates:
-                    metric_name_for_path = checkpoint_metric.replace('/', '_')
                     for rank, candidate in enumerate(top_checkpoint_candidates, start=1):
+                        metric_label, metric_value = _checkpoint_metric_label_and_value(
+                            candidate,
+                            checkpoint_metric,
+                        )
                         top_path = checkpoint_dir / (
                             f"{run_id}_fold_{fold+1}_rank_{rank}_"
-                            f"{metric_name_for_path}_auc_{candidate['val_auc']:.4f}.pt"
+                            f"{metric_label}_{metric_value:.4f}.pt"
                         )
                         if top_path.exists() and not train_config.get('overwrite_checkpoints', False):
                             raise FileExistsError(
@@ -1203,8 +1288,9 @@ def train_gvae_single_fold(
         'in_channels',
         0,
     )
-    clinical_cont_idx = torch.arange(0, min(5, clinical_dim), device=device)
-    clinical_bin_idx = torch.arange(5, min(22, clinical_dim), device=device)
+    clinical_cont_idx, clinical_bin_idx = _resolve_clinical_indices(
+        train_config, clinical_dim, device
+    )
     if clinical_bin_idx.numel() > 0 and 'x_clinical' in full_multi_view_data['patient']:
         clinical_bin_feats_train = (
             full_multi_view_data['patient'].x_clinical.to(device)[train_indices][
@@ -1217,9 +1303,7 @@ def train_gvae_single_fold(
     else:
         clinical_bin_pos_weight = None
 
-    clinical_cont_idx = torch.arange(0, 5, device=device)
-    clinical_bin_idx = torch.arange(5, 22, device=device)
-    clinical_bin_feats = full_multi_view_data['patient'].x_clinical[:, 5:22]
+    clinical_bin_feats = full_multi_view_data['patient'].x_clinical[:, clinical_bin_idx]
     n_pos_bin = clinical_bin_feats.sum(dim=0)
     n_neg_bin = clinical_bin_feats.shape[0] - n_pos_bin
     clinical_bin_pos_weight = (n_neg_bin / (n_pos_bin + 1e-6)).to(device)
@@ -1986,9 +2070,11 @@ def kfold_evaluate_gvae_classifier(
     full_cpu = full_multi_view_data.clone().cpu()
 
     # --- Loss context (mirrors kfold_train_gvae setup) ---
-    clinical_cont_idx = torch.arange(0, 5, device=device)
-    clinical_bin_idx = torch.arange(5, 22, device=device)
-    clinical_bin_feats = full_cpu['patient'].x_clinical[:, 5:22]
+    clinical_dim = full_cpu['patient'].x_clinical.shape[1]
+    clinical_cont_idx, clinical_bin_idx = _resolve_clinical_indices(
+        train_config, clinical_dim, device
+    )
+    clinical_bin_feats = full_cpu['patient'].x_clinical[:, clinical_bin_idx]
     n_pos = clinical_bin_feats.sum(dim=0)
     n_neg = clinical_bin_feats.shape[0] - n_pos
     clinical_bin_pos_weight = (n_neg / (n_pos + 1e-6)).to(device)

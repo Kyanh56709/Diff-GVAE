@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import random
+import warnings
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -117,7 +118,7 @@ def _normalize_augmentation_modes(modes: Optional[Iterable[str]]) -> Tuple[str, 
     if modes is None:
         return DEFAULT_AUGMENTATION_MODES
     normalized = tuple(_mode_name(mode) for mode in modes)
-    valid = {"minority_only", "responder_only", "both_classes"}
+    valid = {"minority_only", "nonresponder_only", "responder_only", "both_classes"}
     unknown = sorted(set(normalized) - valid)
     if unknown:
         raise ValueError(
@@ -128,10 +129,23 @@ def _normalize_augmentation_modes(modes: Optional[Iterable[str]]) -> Tuple[str, 
 
 
 def _classes_for_augmentation(labels_np: np.ndarray, mode: str) -> Tuple[int, ...]:
+    """Map an augmentation mode to the class(es) to generate.
+
+    Label convention: binary_label 1 = NON-responder, 0 = responder.
+    """
     counts = {label: int((labels_np == label).sum()) for label in (0, 1)}
     if mode == "both_classes":
         return tuple(label for label in (0, 1) if counts[label] > 0)
+    if mode == "nonresponder_only":
+        return (1,) if counts[1] > 0 else tuple()
     if mode == "responder_only":
+        warnings.warn(
+            "augmentation mode 'responder_only' is deprecated: binary_label 1 "
+            "denotes NON-responders, so this mode generates non-responder "
+            "latents; use 'nonresponder_only' instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return (1,) if counts[1] > 0 else tuple()
     if mode == "minority_only":
         positive_counts = {label: count for label, count in counts.items() if count > 0}
