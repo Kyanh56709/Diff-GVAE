@@ -2074,14 +2074,8 @@ def kfold_evaluate_gvae_classifier(
     clinical_cont_idx, clinical_bin_idx = _resolve_clinical_indices(
         train_config, clinical_dim, device
     )
-    clinical_bin_feats = full_cpu['patient'].x_clinical[:, clinical_bin_idx]
-    n_pos = clinical_bin_feats.sum(dim=0)
-    n_neg = clinical_bin_feats.shape[0] - n_pos
-    clinical_bin_pos_weight = (n_neg / (n_pos + 1e-6)).to(device)
 
     labels_all = full_cpu['patient']['binary_label'].numpy()
-    pos_weight_value = np.sum(labels_all == 0) / (np.sum(labels_all == 1) + 1e-6)
-    print(f"INFO: Using pos_weight for Main Task BCE loss: {pos_weight_value:.2f}")
 
     loss_weights = train_config['loss_weights']
     anneal_config = train_config.get('annealing', {})
@@ -2102,10 +2096,8 @@ def kfold_evaluate_gvae_classifier(
 
     use_vec_cl = train_config.get('vectorized_contrastive', False)
     ctx = {
-        'criterion_main_bce': nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight_value], device=device)),
         'criterion_mse': nn.MSELoss(),
         'clinical_cont_idx': clinical_cont_idx, 'clinical_bin_idx': clinical_bin_idx,
-        'clinical_bin_pos_weight': clinical_bin_pos_weight,
         'w_rec_attr_config': loss_weights['rec_attr'], 'w_rec_struct_config': loss_weights['rec_struct'],
         'base_w_class': base_w_class,
         'contrastive_fn': calculate_contrastive_loss_vectorized if use_vec_cl else calculate_contrastive_loss,
@@ -2147,6 +2139,17 @@ def kfold_evaluate_gvae_classifier(
         inner_tr_np, inner_val_np = train_test_split(
             train_idx_np, test_size=inner_val_split,
             stratify=y_strat[train_idx_np], random_state=eval_seed)
+
+        # Train-only pos weights (no validation/test leakage into loss weighting).
+        tr_clin_bin = full_cpu['patient'].x_clinical[inner_tr_np][:, clinical_bin_idx]
+        tr_n_pos = tr_clin_bin.sum(dim=0)
+        tr_n_neg = tr_clin_bin.shape[0] - tr_n_pos
+        ctx['clinical_bin_pos_weight'] = (tr_n_neg / (tr_n_pos + 1e-6)).to(device)
+        tr_labels = y_strat[inner_tr_np]
+        pw_value = np.sum(tr_labels == 0) / (np.sum(tr_labels == 1) + 1e-6)
+        ctx['criterion_main_bce'] = nn.BCEWithLogitsLoss(
+            pos_weight=torch.tensor([pw_value], device=device))
+        print(f"INFO: Fold {fold+1} train-only pos_weight for Main Task BCE loss: {pw_value:.2f}")
 
         fold_data = full_cpu.to(device)
         inner_tr = torch.tensor(inner_tr_np, device=device)
