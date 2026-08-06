@@ -13,13 +13,16 @@ Network notes (same as previous session): TCIA website/API and Synapse unreachab
 | Tier | # | Dataset | Tumor (NSCLC?) | Modalities | N (ICI) | Response labels | License |
 |---|---|---|---|---|---|---|---|
 | **S** | 1 | I3LUNG DATASETS (Zenodo 17535424) | NSCLC — **Yes** | clinical + pyradiomics + FM radiology + digital pathology + genomics | 2,075 (tri-modal 391) | BEST RESPONSE (PD/SD/PR/CR), ORR, DCR, CBR, PFS, OS | CC-BY-NC-4.0 |
-| **S** | 2 | cBioPortal `lung_msk_mind_2020` (Vanguri 2022) | NSCLC — **Yes** | clinical + MSK-IMPACT mutations/CNA/SV | 247 | BOR (CR/PR/SD/POD), DCR, PFS, OS | cBioPortal public |
-| **S/A** | 3 | Synapse `syn26642505` (Vanguri 2022 full release) | NSCLC — **Yes** | "all data" (incl. radiomics + PD-L1 IHC texture) | 247 | RECIST binarized | Synapse (geo-blocked) |
+| ~~S~~ | 2 | cBioPortal `lung_msk_mind_2020` (Vanguri 2022) | NSCLC — **Yes** | clinical + MSK-IMPACT mutations/CNA/SV | 247 | BOR (CR/PR/SD/POD), DCR, PFS, OS | cBioPortal public | **EXCLUDED — same cohort as project (Vanguri/MSK-MIND, N=247)** |
+| ~~S/A~~ | 3 | Synapse `syn26642505` (Vanguri 2022 full release) | NSCLC — **Yes** | "all data" (incl. radiomics + PD-L1 IHC texture) | 247 | RECIST binarized | Synapse (geo-blocked) | **EXCLUDED — same cohort as project (Vanguri/MSK-MIND)** |
 | **A** | 4 | cBioPortal `nsclc_mskcc_2018` (Hellmann/CheckMate 012) | NSCLC — **Yes** | clinical + WES | 75 | BEST_OVERALL_RESPONSE, DCB, PFS | cBioPortal public |
 | **A** | 5 | **IMvigor210** — GitHub mirror of Bioconductor `IMvigor210CoreBiologies` | **Urothelial (bladder) — No** | clinical + RNA-seq counts + FMOne targeted mutations + TMB | 348 (RNA-seq 298) | **RECIST v1.1 4-class (CR/PR/SD/PD) + binaryResponse** + OS | Genentech license (package LICENSE; raw EGA controlled) |
 | **A** | 6 | **IMvigor210** — cBioPortal `blca_iatlas_imvigor210_2017` (iAtlas) | **Urothelial (bladder) — No** | clinical + WES mutations + RNA-seq + gene signatures | 347 | RESPONDER (mRECIST CR/PR) 68/230, CB, PROGRESSION, OS, TMB, neoantigens | cBioPortal/iAtlas public |
 | **A** | 7 | **IMmotion150** — cBioPortal `rcc_iatlas_immotion150_2018` | **RCC — No** | clinical + WES mutations + RNA-seq + gene signatures | 263 (174 atezolizumab) | RESPONDER 72/175, CB, PROGRESSION, PFS | cBioPortal/iAtlas public |
 | **A** | 8 | **Gide 2019** — cBioPortal `mel_iatlas_gide_2019` | **Melanoma — No** | clinical + RNA-seq + gene signatures | 91 (75 labeled) | RESPONDER 40/35, CB, PROGRESSION, OS | cBioPortal/iAtlas public |
+
+> **EXCLUDED (owner decision 2026-08-06):** entries 2 and 3 are the **same cohort the project already uses** (Vanguri et al. 2022, MSK-MIND, N=247 — the source of `data_ln_pc_ihc_g.pt`). They are kept only as reference (cBioPortal = public clinical/genomics mirror; Synapse = full release incl. radiomics + IHC texture), NOT as external-validation candidates. External candidates start at entry 1 (I3LUNG) and entries 4+.
+
 | **B** | 9 | cBioPortal `tmb_mskcc_2018` (Samstein 2019) | pan-cancer incl. NSCLC — **Yes** (≈315) | clinical + MSK-IMPACT | 1,661 | OS only (no RECIST in portal) | cBioPortal public |
 | **B** | 10 | GEO GSE126044 | NSCLC — **Yes** | RNA-seq | 16 | responder/non-responder in metadata | GEO public |
 | **B** | 11 | GEO GSE135222 | NSCLC — **Yes** | RNA-seq | 27 | response in paper only | GEO public |
@@ -55,7 +58,7 @@ Network notes (same as previous session): TCIA website/API and Synapse unreachab
 - **Blockers**: non-commercial license; features only (no raw CT/WSI); radiology per-patient not per-lesion; pathology WSI-level embeddings not GLCM.
 - **Verification**: record API + full zip download + column/row inspection + label-consistency check, this session. Related: protocol PMID 36959048; validation preprint DOI 10.64898/2026.01.16.25342913 (HTTP 200).
 
-### 2. cBioPortal `lung_msk_mind_2020` — Vanguri et al. 2022 cohort — **NSCLC: Yes**
+### 2. cBioPortal `lung_msk_mind_2020` — Vanguri et al. 2022 cohort — **NSCLC: Yes — EXCLUDED (same cohort as project, owner 2026-08-06)**
 - **Description**: Genomic/clinical component of the project's own source cohort (MSK MIND; 247 advanced NSCLC on PD-(L)1; Nature Cancer 2022).
 - **Verified URL**: https://www.cbioportal.org/study/summary?id=lung_msk_mind_2020 (API data in `raw/cbio_lung_msk_mind_2020*.json`, `raw/cbio_mind_clinical_*.json`).
 - **License/access**: public via portal/API; no formal license (cBioPortal terms; MSK data policy).
@@ -67,7 +70,7 @@ Network notes (same as previous session): TCIA website/API and Synapse unreachab
 - **Blockers**: no radiology/pathology features in the portal (those live on Synapse); no imaging.
 - **Verification**: study record, attribute list, BOR distribution, molecular profiles — fetched this session.
 
-### 3. Synapse `syn26642505` — Vanguri et al. 2022 full data release — **NSCLC: Yes**
+### 3. Synapse `syn26642505` — Vanguri et al. 2022 full data release — **NSCLC: Yes — EXCLUDED (same cohort as project, owner 2026-08-06)**
 - **Description**: The paper's official release ("All data are publicly available at synapse … syn26642505", verified verbatim from PMC9586871; also cited by KatherLab Cancer Res Commun 2024 and LORIS Nat Cancer 2024).
 - **Verified URL**: https://www.synapse.org/#!Synapse:syn26642505 — existence verified via 3 independent data-availability statements; **direct access blocked from this region** (NOT-OD-25-083).
 - **License/access**: Synapse project; download requires account + ToU acceptance.

@@ -19,8 +19,9 @@
 ## Tiêu chí screen (fit matrix) — CẬP NHẬT 2026-08-06 (owner)
 - **NSCLC + ICI response: ưu tiên cao nhất (điểm cộng lớn), nhưng KHÔNG bắt buộc.**
 - Chấp nhận MỌI solid tumor + ICI (anti-PD-(L)1/anti-CTLA-4) có response label (RECIST/irRECIST/iRECIST, CR/PR/SD/PD hoặc binary) + ≥2 modality (clinical tabular / imaging hoặc radiomics sẵn / pathology / genomics).
+- **LOẠI (owner 2026-08-06):** cBioPortal `lung_msk_mind_2020` và Synapse `syn26642505` — đều là chính cohort nguồn của project (Vanguri 2022 / MSK-MIND, N=247) → chỉ giữ làm reference, không phải ứng viên external.
 - Ví dụ cần tìm thêm: urothelial/bladder (IMvigor210 atezolizumab — clinical + RNA-seq + response), melanoma (Gide 2019, Hugo 2016), RCC, head & neck, colorectal MSI-H ICI.
-- Ghi rõ trong datasets.md: NSCLC vs non-NSCLC.
+- Ghi rõ trong datasets.md: NSCLC vs non-NSCLC + cờ EXCLUDED.
 - Các tiêu chí còn lại giữ nguyên (response labels thật, public access + license rõ, N ≥ ~50, effort "simple": tabular/radiomics sẵn > raw DICOM).
 
 ## Agent
