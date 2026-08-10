@@ -84,3 +84,92 @@ Kết luận: coverage 0.0 = ngưỡng p95-real-NN rất khắt khe (4.92) + 49 
 - Logs: `research/2026-08-06-project-review-audit/output/raw/ddpm_a1*.log`
 - Runs: `outputs/conditional_latent_ddpm/conditional_latent_ddpm_from_gvae_bestparam_ranked_20260807_095233_20260810_*`
 - Chốt config A2: epochs 600, timesteps 250, guidance 1.0, seed 42, rank 1, device cpu
+
+---
+
+# PHẦN 2 — A2 full rerun + A3 filter retune + A4 TSTR (cùng ngày)
+
+## 8. A2 — Full rerun (3 modes × 4 ratios × 5 folds, epochs 600, guidance 1.0)
+
+Run: `conditional_latent_ddpm_from_gvae_bestparam_ranked_20260807_095233_20260810_153849`
+(~6 phút CPU, log `pipeline_phase5.log`). Real-only baseline không đổi
+(0.7104/0.8694/0.7202) vì deterministic từ GVAE.
+
+### 8a. Unfiltered branches
+
+| Branch | ROC-AUC | PR-AUC | BA | synthetic TB | coverage (mean) | MMD (mean) |
+|---|---|---|---|---|---|---|
+| Real only | 0.7104 | 0.8694 | 0.7202 | 0 | — | — |
+| both_classes r0.25 | 0.7050 | 0.8732 | 0.7087 | 49 | 0.031 | 0.045 |
+| both_classes r0.5 | 0.6673 | 0.8432 | 0.6920 | 98.6 | 0.024 | 0.040 |
+| both_classes r1.0 | 0.6809 | 0.8500 | 0.6938 | 197.6 | 0.071 | 0.034 |
+| both_classes r2.0 | 0.6529 | 0.8302 | 0.7000 | 395.2 | 0.131 | 0.025 |
+| minority_only r0.25 | 0.7024 | 0.8687 | 0.7180 | 12 | 0.011 | 0.090 |
+| minority_only r0.5 | 0.6798 | 0.8464 | 0.6915 | 24.6 | 0.012 | 0.068 |
+| minority_only r1.0 | 0.6719 | 0.8441 | 0.6976 | 49.6 | 0.025 | 0.054 |
+| minority_only r2.0 | 0.6579 | 0.8364 | 0.6870 | 99.2 | 0.024 | 0.040 |
+| nonresponder_only r0.25 | 0.6982 | 0.8671 | 0.7156 | 37 | 0.013 | 0.056 |
+| nonresponder_only r0.5 | 0.6989 | 0.8602 | 0.7037 | 74 | 0.062 | 0.044 |
+| nonresponder_only r1.0 | 0.6903 | 0.8600 | 0.6935 | 148 | 0.122 | 0.034 |
+| nonresponder_only r2.0 | 0.6981 | 0.8655 | 0.7132 | 296 | 0.110 | 0.027 |
+
+**Chất lượng latent cải thiện lớn so baseline 20260809_184454** (coverage 0→0.01–0.13
+mọi branch; MMD 0.31→0.025–0.09). Downstream vẫn ≈ real-only — chênh trong nhiễu
+(real-only std ROC 0.0475), chưa branch nào thắng rõ.
+
+### 8b. Filtered branches (q0.95) — giờ giữ được mẫu (baseline giữ 0)
+
+| Branch | ROC-AUC | synth TB/fold |
+|---|---|---|
+| both_classes r0.25 / r0.5 / r1.0 / r2.0 | 0.7055 / 0.7074 / **0.7130** / 0.6826 | 1.8 / 4.0 / 8.0 / 17.4 |
+| minority_only r0.25 / r0.5 / r1.0 / r2.0 | 0.6908 / 0.6997 / 0.6950 / 0.7129 | 1.2 / 2.2 / 4.6 / 9.0 |
+| nonresponder_only r0.25 / r0.5 / r1.0 / r2.0 | 0.7073 / 0.7069 / 0.7071 / 0.7097 | 0.8 / 2.0 / 6.2 / 6.0 |
+
+## 9. A3 — filter_quantile retune (post-hoc trên latents A2, không retrain)
+
+Script: `research/2026-08-06-project-review-audit/scripts/a3_filter_quantile_retune.py`
+(sửa dụng đúng `filter_synthetic_latents_by_knn` + `train_downstream_classifier` của
+pipeline). Output: `.../20260810_153849/a3_filter_quantile_retune.json`.
+
+**Mọi quantile 0.70–0.99 giờ giữ được mẫu** (synthetic_count > 0). Threshold = quantile
+của real-NN distances per class → **quantile càng cao giữ càng nhiều** (khắt khe hơn
+không giúp): both_classes r1.0: q0.70 giữ 0.4/fold, q0.95 giữ 8.0, q0.97 giữ 13.6,
+q0.99 giữ 22.2.
+
+Best cells theo ROC (mean 5 folds):
+- both_classes r1.0 **q0.97**: 13.6/fold, ROC 0.7144 (trên real-only 0.7104, +0.004)
+- minority_only r1.0 q0.90: 3.0/fold, ROC 0.7231; minority_only r2.0 q0.90: 6.0/fold, ROC 0.7193
+- Đa số còn lại quanh 0.68–0.71 — trong nhiễu.
+
+**Kết luận A3:** giữ quantile 0.95–0.97 (mặc định 0.95 ổn, 0.97 giữ nhiều hơn ~1.7× với
+ROC tương đương); hạ xuống 0.7–0.9 KHÔNG có lợi (giữ ít mẫu hơn, ROC không tốt hơn).
+
+## 10. A4 — TSTR control (train synthetic-only → test val real)
+
+Script: `research/2026-08-06-project-review-audit/scripts/a4_tstr_control.py`.
+Output: `.../20260810_153849/a4_tstr_control.json`.
+Chỉ có nghĩa với both_classes (minority_only/nonresponder_only sinh 1 class → binary
+downstream không train được).
+
+| Branch | n_train | ROC-AUC | PR-AUC |
+|---|---|---|---|
+| REAL_ONLY (baseline) | 198 | 0.7104 | 0.8694 |
+| both_classes r0.25 | 49 | 0.5832 | 0.8066 |
+| both_classes r0.5 | 99 | 0.5510 | 0.7832 |
+| both_classes r1.0 | 197 | 0.6223 | 0.8200 |
+| both_classes r2.0 | 395 | 0.6159 | 0.8070 |
+
+**Kết luận A4:** synthetic mang tín hiệu phân lớp THẬT (TSTR ROC 0.55–0.62, PR 0.78–0.82,
+đều >> 0.5/random) nhưng kém real-only ~0.09–0.16 ROC → augmentation chỉ học được phần
+tín hiệu, chất lượng chưa bằng dữ liệu thật. Khớp với kết luận trung thực chung:
+augmentation chưa thắng real-only có ý nghĩa thống kê.
+
+## 11. Tổng kết A1–A4
+
+1. **A1**: 600 epochs là knob quyết định — mọi chỉ số chất lượng latent đạt mục tiêu
+   (coverage > 0, ratio < 1.5, MMD -90%, NN -58%, không memorization).
+2. **A2**: cải thiện chất lượng không chuyển thành thắng downstream — aug ≈ real-only
+   (trong nhiễu). Filtered path hoạt động trở lại (giữ 1.8–17.4/fold ở q0.95).
+3. **A3**: q0.95–0.97 là điểm cân bằng tốt; quantile thấp hơn không giúp.
+4. **A4**: TSTR chứng minh synthetic học được tín hiệu thật nhưng chưa đủ thay thế real.
+5. Còn lại: A5 (PCA branch) chưa chạy; manuscript B1–B3 chờ owner gỡ defer.
