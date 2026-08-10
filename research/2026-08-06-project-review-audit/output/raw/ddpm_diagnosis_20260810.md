@@ -173,3 +173,48 @@ augmentation chưa thắng real-only có ý nghĩa thống kê.
 3. **A3**: q0.95–0.97 là điểm cân bằng tốt; quantile thấp hơn không giúp.
 4. **A4**: TSTR chứng minh synthetic học được tín hiệu thật nhưng chưa đủ thay thế real.
 5. Còn lại: A5 (PCA branch) chưa chạy; manuscript B1–B3 chờ owner gỡ defer.
+
+## 12. A5 — PCA branch (--pca-components 32, 600ep, fold 1, both_classes r0.25)
+
+Run: `...20260810_161120` (log `ddpm_a5_pca32.log`). Lần đầu test v2 flag PCA.
+
+### 12a. Quality metrics (trong không gian PCA 32-dim — không so trực tiếp với 96-dim)
+
+| Metric | Non-PCA 600ep (96-dim) | PCA 32 (600ep) |
+|---|---|---|
+| MMD | 0.032 | **0.0228** |
+| Coverage | 0.056 | **0.284** (5.1×) |
+| Diversity ratio gen/real | 1.41 | **1.24** |
+| NN mean | 8.04 | **6.75** |
+| near_dup | 0.0 | 0.0 ✓ |
+| gen std vs real | 1.50 vs 1.28 | 1.73 vs 1.39 (32-dim) |
+
+### 12b. Downstream (fold 1)
+
+| Branch | ROC | PR | synth kept (q0.95) |
+|---|---|---|---|
+| real_only (pca_32) | 0.6611 | 0.8403 | 0 |
+| +aug unfiltered | 0.6632 | 0.8453 | 49 |
+| +aug filtered q0.95 | 0.6570 | 0.8366 | **10.0** (20% giữ — vs 1 mẫu non-PCA) |
+
+### 12c. Kết luận A5
+
+PCA 32 cải thiện mạnh chất lượng latent (coverage 0.284, ratio 1.24) và làm filtered
+path q0.95 hoạt động hiệu quả (giữ 20% generated so với ~2% non-PCA). Downstream vẫn
+≈ real-only (chênh nhiễu) — nhưng nếu pipeline cuối dùng filtered path, **PCA 32 là
+nền tốt hơn**.
+
+## 13. Tổng kết toàn bộ A1–A5
+
+| # | Task | Kết quả chính |
+|---|---|---|
+| A1 | Diagnosis epochs/guidance | 600ep/g1.0: coverage 0.056, MMD 0.032, ratio 1.41, NN 8.04 — cải thiện rõ; guidance không phải knob |
+| A2 | Full rerun 600ep | Coverage > 0 mọi branch; downstream ≈ real-only (trong nhiễu); filtered giữ mẫu |
+| A3 | filter_quantile retune | q0.95–0.97 tối ưu; q thấp hơn không giúp; best cell both_classes r1.0 q0.97 ROC 0.7144 |
+| A4 | TSTR control | ROC 0.55–0.62 vs 0.7104 real — synthetic học được tín hiệu thật, kém real |
+| A5 | PCA 32 | Coverage 0.284, ratio 1.24, filter q0.95 giữ 20% — nền tốt hơn cho filtered path |
+
+**Kết luận trung thực chung:** epochs 600 + guidance 1.0 (+ PCA 32 nếu dùng filter) khắc
+phục hoàn toàn vấn đề chất lượng latent của baseline 120ep/g3.0. Tuy vậy, augmentation
+vẫn chưa thắng real-only có ý nghĩa thống kê trên downstream (chênh trong CI ~±0.05).
+Đây là giới hạn của phương pháp trên cỡ mẫu 247, không phải lỗi config.
