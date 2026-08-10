@@ -136,10 +136,16 @@ của real-NN distances per class → **quantile càng cao giữ càng nhiều**
 không giúp): both_classes r1.0: q0.70 giữ 0.4/fold, q0.95 giữ 8.0, q0.97 giữ 13.6,
 q0.99 giữ 22.2.
 
-Best cells theo ROC (mean 5 folds):
-- both_classes r1.0 **q0.97**: 13.6/fold, ROC 0.7144 (trên real-only 0.7104, +0.004)
-- minority_only r1.0 q0.90: 3.0/fold, ROC 0.7231; minority_only r2.0 q0.90: 6.0/fold, ROC 0.7193
-- Đa số còn lại quanh 0.68–0.71 — trong nhiễu.
+**Ghi chú phương pháp (sau code-review):** các cell kept=0 được evaluate như pipeline
+(degenerate → real-only baseline ROC), KHÔNG drop folds — nếu không, mean bị lệch
+(các quantile thấp giữ 0 mẫu nhiều nhất → ROC bị inflate). Kết quả dưới đây là
+like-for-like 5/5 folds mọi cell.
+
+Best cells theo ROC (mean 5 folds, band nhiễu real-only std 0.0475):
+- both_classes r1.0 **q0.97**: 13.6/fold, ROC 0.7144 (+0.004 so real-only 0.7104)
+- minority_only r2.0 q0.90: 6.0/fold, ROC 0.7193 (+0.009)
+- nonresponder_only r0.5 q0.99: 8.8/fold, ROC 0.7212 (+0.011)
+- Tất cả nằm trong nhiễu (±0.01), không cell nào thắng có ý nghĩa thống kê.
 
 **Kết luận A3:** giữ quantile 0.95–0.97 (mặc định 0.95 ổn, 0.97 giữ nhiều hơn ~1.7× với
 ROC tương đương); hạ xuống 0.7–0.9 KHÔNG có lợi (giữ ít mẫu hơn, ROC không tốt hơn).

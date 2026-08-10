@@ -66,19 +66,19 @@ def main():
                     )
                     kept_x = filtered["latents"]
                     kept_y = filtered["labels"]
-                    if kept_x.shape[0] > 0:
-                        metrics = train_downstream_classifier(
-                            np.concatenate([real_tr, kept_x], axis=0),
-                            np.concatenate([real_tr_y, kept_y], axis=0),
-                            real_val,
-                            real_val_y,
-                            CLASSIFIER_CONFIG,
-                        )
-                        roc = metrics["threshold_0_5"]["roc_auc"]
-                        pr = metrics["threshold_0_5"]["pr_auc"]
-                        ba = metrics["threshold_0_5"]["balanced_accuracy"]
-                    else:
-                        roc = pr = ba = None
+                    # Mirror the pipeline: always evaluate the downstream even when
+                    # 0 samples are kept (degenerates to the real-only baseline),
+                    # so kept=0 folds are NOT dropped from quantile means.
+                    metrics = train_downstream_classifier(
+                        np.concatenate([real_tr, kept_x], axis=0),
+                        np.concatenate([real_tr_y, kept_y], axis=0),
+                        real_val,
+                        real_val_y,
+                        CLASSIFIER_CONFIG,
+                    )
+                    roc = metrics["threshold_0_5"]["roc_auc"]
+                    pr = metrics["threshold_0_5"]["pr_auc"]
+                    ba = metrics["threshold_0_5"]["balanced_accuracy"]
                     rows.append(
                         {
                             "fold": fold_dir.name,
@@ -113,7 +113,8 @@ def main():
         kept = np.mean([r["kept"] for r in sub])
         rocs = [r["roc_auc"] for r in sub if r["roc_auc"] is not None]
         roc = np.mean(rocs) if rocs else None
-        print(f"{mode:<18} {ratio:>5} {q:>4.2f} {kept:>9.1f} {roc if roc is None else round(roc,4):>9}")
+        n_folds = len([r for r in sub if r["roc_auc"] is not None])
+        print(f"{mode:<18} {ratio:>5} {q:>4.2f} {kept:>9.1f} {roc if roc is None else round(roc,4):>9} ({n_folds}/5 folds)")
 
 
 if __name__ == "__main__":
