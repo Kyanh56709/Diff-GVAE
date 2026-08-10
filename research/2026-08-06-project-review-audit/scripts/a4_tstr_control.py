@@ -45,7 +45,9 @@ def load_real(base: Path):
 def main():
     rows = []
     for fold_dir in sorted(RUN_ROOT.glob("fold_*")):
-        base = sorted(fold_dir.glob("rank_*"))[0]
+        rank_dirs = sorted(fold_dir.glob("rank_*"))
+        rank_dirs = [p for p in rank_dirs if p.name.startswith("rank_1_")] or rank_dirs
+        base = rank_dirs[0]
         real_tr, real_tr_y, real_val, real_val_y = load_real(base)
         # real-only baseline (for reference, per fold)
         baseline = train_downstream_classifier(real_tr, real_tr_y, real_val, real_val_y, CLASSIFIER_CONFIG)

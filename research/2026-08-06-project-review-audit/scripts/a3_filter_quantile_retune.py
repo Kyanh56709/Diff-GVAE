@@ -49,6 +49,7 @@ def main():
     rows = []
     for fold_dir in sorted(RUN_ROOT.glob("fold_*")):
         rank_dirs = sorted(fold_dir.glob("rank_*"))
+        rank_dirs = [p for p in rank_dirs if p.name.startswith("rank_1_")] or rank_dirs
         assert len(rank_dirs) == 1, f"expected 1 rank dir, got {len(rank_dirs)} in {fold_dir}"
         base = rank_dirs[0]
         real_tr, real_tr_y, real_val, real_val_y = load_real(base)
