@@ -1,13 +1,17 @@
-torch
-torch_geometric
-torch_scatter
-scikit-learn
-numpy
-pandas
-tqdm
-matplotlib
-wandb
-einops
-seaborn
-scipy
+# Exact pins from the verified repo venv (Python 3.9.6, checked 2026-10-03).
+# torch_scatter must match the torch build; install it from the PyG wheel index:
+#   pip install torch_scatter==2.1.2 -f https://data.pyg.org/whl/torch-2.8.0.html
+torch==2.8.0
+torch_geometric==2.6.1
+torch_scatter==2.1.2
+scikit-learn==1.6.1
+numpy==2.0.2
+pandas==2.3.3
+tqdm==4.68.1
+matplotlib==3.9.4
+wandb==0.26.1
+einops==0.8.2
+seaborn==0.13.2
+scipy==1.13.1
+# Optional: not installed in the verified venv as of 2026-10-03; pin when first used.
 umap-learn
