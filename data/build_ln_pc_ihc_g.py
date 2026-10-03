@@ -127,6 +127,8 @@ RADIOLOGY_NO_LOG1P = {
     "wavelet-HLH_glcm_Imc2",
 }
 
+RADIOLOGY_ARTIFACT_MODES = ("none", "file_rank", "both")
+
 EDGE_TYPES = [
     ("patient", "similar_to_clinical", "patient"),
     ("patient", "similar_to_pathology", "patient"),
@@ -262,8 +264,15 @@ def build_pathology(df_glcm: pd.DataFrame, patient_order: list, num_patients: in
     return X, mask, (edge_index, edge_attr)
 
 
-def build_radiology(df_rad: pd.DataFrame, patient_order: list):
-    """Return (lesion_x, radiology_mask, has_lesion edges, similarity edges)."""
+def build_radiology(df_rad: pd.DataFrame, patient_order: list, drop_artifacts: str = "none"):
+    """Return (lesion_x, radiology_mask, has_lesion edges, similarity edges).
+
+    drop_artifacts: "none" (canonical 34 slots), "file_rank" (drop slot 0 ->
+    33 slots) or "both" (drop slots 0 and 1 -> 32 radiomics slots).  Only for
+    ablations; the dropped slots also leave the radiology similarity signature.
+    """
+    if drop_artifacts not in RADIOLOGY_ARTIFACT_MODES:
+        raise ValueError(f"drop_artifacts must be one of {RADIOLOGY_ARTIFACT_MODES}")
     rad = pd.read_csv(df_rad) if isinstance(df_rad, (str, Path)) else df_rad.copy()
     rad["_file_pos"] = np.arange(len(rad))
 
@@ -295,7 +304,8 @@ def build_radiology(df_rad: pd.DataFrame, patient_order: list):
         if col not in RADIOLOGY_NO_LOG1P:
             v = log1p(np.clip(v, 0, None))
         transformed.append(v)
-    matrix = np.column_stack([counter, lesion_index] + transformed)
+    artifacts = {"none": [counter, lesion_index], "file_rank": [lesion_index], "both": []}[drop_artifacts]
+    matrix = np.column_stack(artifacts + transformed)
 
     lesion_x = RobustScaler().fit_transform(matrix)
 
@@ -426,7 +436,15 @@ def main():
     parser.add_argument("--radiology", default=str(root / "data/radiology_features.csv"))
     parser.add_argument("--out", default=str(root / "data/ln_pc_ihc_g_rebuilt.pt"))
     parser.add_argument("--verify", default=None, help="canonical .pt to compare against")
+    parser.add_argument(
+        "--drop-radiology-artifacts",
+        choices=RADIOLOGY_ARTIFACT_MODES,
+        default="none",
+        help="ablation only: drop the lesion file-rank slot ('file_rank') or both index slots ('both')",
+    )
     args = parser.parse_args()
+    if args.verify and args.drop_radiology_artifacts != "none":
+        parser.error("--verify compares against the canonical 34-slot graph; use it only with --drop-radiology-artifacts none")
 
     if args.verify and Path(args.out).resolve() == Path(args.verify).resolve():
         parser.error("--out and --verify must resolve to different files (refusing to clobber the canonical graph)")
@@ -449,14 +467,22 @@ def main():
 
     # ---- radiology ----
     df_rad = pd.read_csv(args.radiology)
-    lesion_x, rad_mask, has_edges, rad_edges, n_lesions = build_radiology(df_rad, patient_order)
-    print(f"radiology: {n_lesions} lesions ({int(rad_mask.sum())} patients); edges {rad_edges[0].shape[1]}")
+    lesion_x, rad_mask, has_edges, rad_edges, n_lesions = build_radiology(
+        df_rad, patient_order, drop_artifacts=args.drop_radiology_artifacts
+    )
+    print(
+        f"radiology: {n_lesions} lesions x {lesion_x.shape[1]} ({int(rad_mask.sum())} patients); "
+        f"edges {rad_edges[0].shape[1]}"
+    )
 
     # ---- labels ----
     cohort = df_clin.loc[patient_order]
+    for col in ["label", "pfs_censor"]:  # never invent a class/event for a missing value
+        if cohort[col].isna().any():
+            raise ValueError(f"{col} has {int(cohort[col].isna().sum())} missing values in the cohort")
     y = torch.tensor(cohort["pfs"].to_numpy(dtype=np.float32), dtype=torch.float32)
-    event = torch.tensor(cohort["pfs_censor"].fillna(0).to_numpy(dtype=np.int64), dtype=torch.long)
-    binary_label = torch.tensor(cohort["label"].fillna(0).to_numpy(dtype=np.int64), dtype=torch.long)
+    event = torch.tensor(cohort["pfs_censor"].to_numpy(dtype=np.int64), dtype=torch.long)
+    binary_label = torch.tensor(cohort["label"].to_numpy(dtype=np.int64), dtype=torch.long)
 
     # ---- assemble ----
     data = HeteroData()

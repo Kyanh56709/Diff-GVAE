@@ -5,8 +5,8 @@
 
 ## Bối cảnh (input requirement của project)
 - Nguồn cohort: Vanguri et al. 2022 (Nat Cancer, DOI 10.1038/s43018-022-00416-8) — 366 NSCLC PD-(L)1; sub-cohort TMB N=247 = data project.
-- 3 views: clinical 22-dim (5 cont: albumin/dnlr/TMB/tumor_burden/PDL1 + 17 binary: driver genes/IO drugs/ECOG), pathology 15-dim GLCM (từ PD-L1 IHC slides), radiology 34-dim radiomics/lesion (pyradiomics) → attention aggregation cấp patient.
-- Graph: patient + lesion nodes; similarity edges per view (cosine, prune < 0.7); has_lesion edges.
+- 3 views: clinical 22-dim (5 cont: albumin/dnlr/TMB/tumor_burden/PDL1 + 17 binary: driver genes/IO drugs/ECOG), pathology 15-dim GLCM (từ PD-L1 IHC slides), radiology 34-dim/lesion (32 pyradiomics + 2 index artifacts, see `research/2026-10-03-a1-build-script/`) → attention aggregation cấp patient.
+- Graph: patient + lesion nodes; similarity edges per view (cosine > 0.8, verified by the A1 rebuild 2026-10-03); has_lesion edges.
 - Task: binary RECIST v1.1 response.
 
 ## Sub-questions
