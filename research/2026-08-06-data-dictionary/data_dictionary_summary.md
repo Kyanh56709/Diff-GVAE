@@ -109,6 +109,8 @@ By filter:
 
 Correction to the parenthetical raw-CSV figure: the radiology CSV carries **1670** feature columns once its four identifier columns (including `dmp_pt_id`) are excluded; 1671 counts only the three identifiers named in the brief. The 15-dim pathology and 34-dim radiology graph views are a subset of these columns, reduced upstream; no reduction script exists in this repo, so the mapping from raw column to graph slot is not recoverable from the repository alone.
 
+> **Update 2026-10-03 (A1):** the reduction is now recovered. `data/build_ln_pc_ihc_g.py` rebuilds `data_ln_pc_ihc_g.pt` exactly (14/14 checks, maxdiff 0.0); pathology maps 15/15 slots and radiology maps 34/34 slots to columns of `glcm_features.csv` / `radiology_features.csv`. Note the radiology view is in fact **32 radiomics features + 2 index artifacts** (file-order lesion rank and `lesion_index`). Full slot→column tables: `research/2026-10-03-a1-build-script/reports/a1_build_verification.md`.
+
 ## Data-quality notes
 
 - Clinical: 0 missing values; all 17 binary columns take exactly {0,1}; ECOG is a perfect one-hot (every patient row sums to 1); patients may carry multiple driver mutations (max 2).
