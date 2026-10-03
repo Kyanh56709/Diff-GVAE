@@ -5,11 +5,13 @@ Loads the saved real/generated latents from the A2 full rerun
 and re-applies the same-class train-kNN filter at quantiles
 [0.7, 0.8, 0.9, 0.95], then evaluates the downstream classifier
 (real train + kept synthetic -> val real) exactly like the pipeline.
+Pass --run-id to target another DDPM run.
 
 No DDPM retraining, no modification of pipeline code.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -27,7 +29,27 @@ from training.latent_ddpm_augmentation import (  # noqa: E402
 )
 
 A2_RUN = "conditional_latent_ddpm_from_gvae_bestparam_ranked_20260807_095233_20260810_153849"
-RUN_ROOT = Path("outputs/conditional_latent_ddpm") / A2_RUN
+OUTPUT_ROOT = Path("outputs/conditional_latent_ddpm")
+
+
+def parse_args(argv=None) -> Path:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--run-id", default=A2_RUN,
+                        help="DDPM run dir under outputs/conditional_latent_ddpm (default: historical A2 run)")
+    args = parser.parse_args(argv)
+    run_root = OUTPUT_ROOT / args.run_id
+    if not run_root.is_dir():
+        parser.error(f"run dir not found: {run_root}")
+    return run_root
+
+
+def rank1_dir(fold_dir: Path) -> Path:
+    rank_dirs = sorted(fold_dir.glob("rank_*"))
+    rank_dirs = [p for p in rank_dirs if p.name.startswith("rank_1_")] or rank_dirs
+    assert len(rank_dirs) == 1, f"expected 1 rank dir, got {len(rank_dirs)} in {fold_dir}"
+    return rank_dirs[0]
+
+
 QUANTILES = [0.70, 0.80, 0.90, 0.95, 0.97, 0.99]
 MODES = ["both_classes", "minority_only", "nonresponder_only"]
 RATIOS = ["25", "50", "100", "200"]  # pipeline ratio dir names (percent)
@@ -45,13 +67,11 @@ def load_real(base: Path):
     )
 
 
-def main():
+def main(argv=None):
+    run_root = parse_args(argv)
     rows = []
-    for fold_dir in sorted(RUN_ROOT.glob("fold_*")):
-        rank_dirs = sorted(fold_dir.glob("rank_*"))
-        rank_dirs = [p for p in rank_dirs if p.name.startswith("rank_1_")] or rank_dirs
-        assert len(rank_dirs) == 1, f"expected 1 rank dir, got {len(rank_dirs)} in {fold_dir}"
-        base = rank_dirs[0]
+    for fold_dir in sorted(run_root.glob("fold_*")):
+        base = rank1_dir(fold_dir)
         real_tr, real_tr_y, real_val, real_val_y = load_real(base)
         for mode in MODES:
             for ratio in RATIOS:
@@ -101,7 +121,7 @@ def main():
                         flush=True,
                     )
 
-    out_path = RUN_ROOT / "a3_filter_quantile_retune.json"
+    out_path = run_root / "a3_filter_quantile_retune.json"
     out_path.write_text(json.dumps(rows, indent=2, default=float))
     print(f"A3 results -> {out_path}")
 

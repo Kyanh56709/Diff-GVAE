@@ -9,6 +9,7 @@ Question: how much of the classification signal do the synthetic latents carry?
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -23,7 +24,27 @@ if str(REPO_ROOT) not in sys.path:
 from training.latent_ddpm_augmentation import train_downstream_classifier  # noqa: E402
 
 A2_RUN = "conditional_latent_ddpm_from_gvae_bestparam_ranked_20260807_095233_20260810_153849"
-RUN_ROOT = Path("outputs/conditional_latent_ddpm") / A2_RUN
+OUTPUT_ROOT = Path("outputs/conditional_latent_ddpm")
+
+
+def parse_args(argv=None) -> Path:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--run-id", default=A2_RUN,
+                        help="DDPM run dir under outputs/conditional_latent_ddpm (default: historical A2 run)")
+    args = parser.parse_args(argv)
+    run_root = OUTPUT_ROOT / args.run_id
+    if not run_root.is_dir():
+        parser.error(f"run dir not found: {run_root}")
+    return run_root
+
+
+def rank1_dir(fold_dir: Path) -> Path:
+    rank_dirs = sorted(fold_dir.glob("rank_*"))
+    rank_dirs = [p for p in rank_dirs if p.name.startswith("rank_1_")] or rank_dirs
+    assert len(rank_dirs) == 1, f"expected 1 rank dir, got {len(rank_dirs)} in {fold_dir}"
+    return rank_dirs[0]
+
+
 # TSTR is only meaningful for both_classes: minority_only / nonresponder_only
 # generate a single class, which a binary downstream cannot be trained on.
 MODES = ["both_classes"]
@@ -42,12 +63,11 @@ def load_real(base: Path):
     )
 
 
-def main():
+def main(argv=None):
+    run_root = parse_args(argv)
     rows = []
-    for fold_dir in sorted(RUN_ROOT.glob("fold_*")):
-        rank_dirs = sorted(fold_dir.glob("rank_*"))
-        rank_dirs = [p for p in rank_dirs if p.name.startswith("rank_1_")] or rank_dirs
-        base = rank_dirs[0]
+    for fold_dir in sorted(run_root.glob("fold_*")):
+        base = rank1_dir(fold_dir)
         real_tr, real_tr_y, real_val, real_val_y = load_real(base)
         # real-only baseline (for reference, per fold)
         baseline = train_downstream_classifier(real_tr, real_tr_y, real_val, real_val_y, CLASSIFIER_CONFIG)
@@ -86,7 +106,7 @@ def main():
                     flush=True,
                 )
 
-    out_path = RUN_ROOT / "a4_tstr_control.json"
+    out_path = run_root / "a4_tstr_control.json"
     out_path.write_text(json.dumps(rows, indent=2, default=float))
     print(f"A4 results -> {out_path}")
 
