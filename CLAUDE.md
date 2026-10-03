@@ -8,9 +8,9 @@ Diff-GVAE is a PyTorch-based multi-view GVAE pipeline. Patients have up to 3 vie
 
 ## Data Format
 
-- Input: `data_ln_pc_ihc_g.pt` — a `torch_geometric.data.HeteroData` object
+- Input: `data_ln_pc_ihc_g_r32.pt` (canonical since 2026-10-03; built by `data/build_ln_pc_ihc_g.py --drop-radiology-artifacts both`) — a `torch_geometric.data.HeteroData` object. The older `data_ln_pc_ihc_g.pt` (lesion dim 34 = 32 radiomics + 2 index artifacts) is kept only to reproduce pre-2026-10-03 results
 - Patient node: `x_clinical`, `x_pathology`, `binary_label`/`y`, `pathology_mask`, `radiology_mask`
-- Lesion node: `x` (radiology features)
+- Lesion node: `x` (32 radiomics features per lesion)
 - Edges: `('patient', 'has_lesion', 'lesion')`, `('patient', 'similar_to_clinical', 'patient')`, etc.
 - Clinical feature indices 0–4 are continuous; 5–21 are binary (used for pos_weight in reconstruction loss)
 

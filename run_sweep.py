@@ -11,7 +11,7 @@ def main():
     print(f"Using device for sweep: {device}")
 
     # 2. Load the dataset
-    data_path = 'data_ln_pc_ihc_g.pt'
+    data_path = 'data_ln_pc_ihc_g_r32.pt'
     print(f"Loading data from {data_path}...")
     try:
         data = torch.load(data_path, weights_only=False)

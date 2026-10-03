@@ -53,7 +53,11 @@ Paired ΔAUC so với full34 (95% CI): head trong khoảng +0.002 → +0.036, **
 - Chênh lệch giữa các seed (sd tới 0.024) lớn hơn hoặc ngang với hiệu ứng của ablation → vẫn nên báo cáo kết quả theo nhiều seed (B3).
 - Chỉ đánh giá GVAE classifier/probe; chưa chạy lại phần DDPM augmentation trên graph đã bỏ artifact.
 
-## Quyết định cần chốt (owner)
+## Cập nhật
+
+Owner đã chọn đổi canonical sang `drop_both32` (2026-10-03). Đã chạy thêm seed 45/46 (head 32 chiều > 34 chiều ở 5/5 seed, mean 0.664 so với 0.640) → xem `research/2026-10-03-canonical-r32/reports/canonical_r32_report.md`.
+
+## Quyết định cần chốt (owner) — đã chốt, xem phần Cập nhật
 
 1. Đổi canonical sang `drop_both32` (chỉ giữ radiomics thuần; số lesion nếu cần thì đưa vào clinical như một feature có tên rõ ràng), **hoặc** `drop_rank33` (giữ `lesion_index`), **hoặc** giữ 34 và nêu trong Limitations kèm ablation này.
 2. Nếu đổi canonical: chạy lại run canonical GVAE + OOF + DDPM, cập nhật mọi số liệu đã chốt (A7) và docs.

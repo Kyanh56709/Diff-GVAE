@@ -16,7 +16,13 @@ PATHOLOGY_CSV = DATA_DIR / "glcm_features.csv"
 RADIOLOGY_CSV = DATA_DIR / "radiology_features.csv"
 
 # Canonical graph (sole authoritative training input) and its rebuild script.
-CANONICAL_GRAPH = PROJECT_ROOT / "data_ln_pc_ihc_g.pt"
+# Since 2026-10-03 the canonical graph drops the two radiology index slots
+# (lesion file-rank, lesion_index): build with
+#   python data/build_ln_pc_ihc_g.py --out data_ln_pc_ihc_g_r32.pt --drop-radiology-artifacts both
+# The 34-slot graph stays for reproducing results frozen before that date.
+CANONICAL_GRAPH = PROJECT_ROOT / "data_ln_pc_ihc_g_r32.pt"
+LEGACY_GRAPH_34 = PROJECT_ROOT / "data_ln_pc_ihc_g.pt"
+RADIOLOGY_LESION_DIM = 32
 BUILD_SCRIPT = DATA_DIR / "build_ln_pc_ihc_g.py"
 
 # Patient-similarity graphs use strict cosine > 0.8 (docs used to say 0.7).

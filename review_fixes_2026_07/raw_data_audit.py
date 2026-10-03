@@ -91,7 +91,7 @@ def run_raw_data_audit(
 
 def main(argv: Optional[List[str]] = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
-    graph = argv[0] if argv else "data_ln_pc_ihc_g.pt"
+    graph = argv[0] if argv else "data_ln_pc_ihc_g_r32.pt"
     csvs = {
         "clinical_unscaled": "data/x_clinical_unscaled_ln_pc_ihc_g.csv",
         "glcm": "data/glcm_features.csv",

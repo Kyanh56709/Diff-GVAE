@@ -122,7 +122,7 @@ def main():
             "latents, and evaluate augmentation with a downstream classifier."
         )
     )
-    parser.add_argument("--data-path", default="data_ln_pc_ihc_g.pt")
+    parser.add_argument("--data-path", default="data_ln_pc_ihc_g_r32.pt")
     parser.add_argument("--gvae-run-id", default=None)
     parser.add_argument("--checkpoint-root", default="outputs/gvae/checkpoints")
     parser.add_argument("--checkpoint-selector", choices=["best", "rank"], default="rank")

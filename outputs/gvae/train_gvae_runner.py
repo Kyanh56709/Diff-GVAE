@@ -50,6 +50,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default=None)
     parser.add_argument("--run-prefix", default="gvae_latent_quality")
+    parser.add_argument("--data-path", default="data_ln_pc_ihc_g_r32.pt")
     args = parser.parse_args()
 
     output_root = Path("outputs/gvae")
@@ -68,7 +69,7 @@ def main():
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    data = torch.load("data_ln_pc_ihc_g.pt", map_location="cpu", weights_only=False)
+    data = torch.load(args.data_path, map_location="cpu", weights_only=False)
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
     model_config = {
@@ -161,7 +162,12 @@ def main():
     run_config_path = metrics_dir / "run_config.json"
     with run_config_path.open("w", encoding="utf-8") as f:
         json.dump(
-            {"run_id": run_id, "model_config": json_ready(model_config), "train_config": json_ready(train_config)},
+            {
+                "run_id": run_id,
+                "data_path": args.data_path,
+                "model_config": json_ready(model_config),
+                "train_config": json_ready(train_config),
+            },
             f,
             indent=2,
         )
