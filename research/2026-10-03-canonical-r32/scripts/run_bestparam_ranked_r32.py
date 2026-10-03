@@ -68,6 +68,7 @@ def main():
     }
     mc, tc = update_configs_with_params(model_config, train_config, best)
     run_id = "gvae_bestparam_ranked_r32_" + time.strftime("%Y%m%d_%H%M%S")
+    tc["run_id"] = run_id
     tc["checkpoint_dir"] = f"outputs/gvae/checkpoints/{run_id}"
     tc["metrics_dir"] = f"outputs/gvae/metrics/{run_id}"
     print("FINAL_CONFIG:", json.dumps({"params": best}, indent=2), flush=True)
