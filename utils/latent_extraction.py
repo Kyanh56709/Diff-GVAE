@@ -81,6 +81,22 @@ def _patient_ids(full_data: HeteroData, indices: torch.Tensor):
     return indices.detach().cpu()
 
 
+def _check_lesion_dim(checkpoint: Dict[str, Any], full_data: HeteroData, checkpoint_path: Path) -> None:
+    """Refuse to apply a checkpoint to a graph whose lesion feature dim differs
+    (e.g. a pre-2026-10-03 34-slot checkpoint on the 32-slot r32 graph)."""
+    agg = (checkpoint.get('model_config') or {}).get('radiology_aggregator_config') or {}
+    expected = agg.get('lesion_feature_dim')
+    if expected is None or 'lesion' not in full_data.node_types or 'x' not in full_data['lesion']:
+        return
+    actual = int(full_data['lesion'].x.shape[1])
+    if int(expected) != actual:
+        raise ValueError(
+            f"Checkpoint {checkpoint_path} has lesion_feature_dim={int(expected)} but the graph has "
+            f"lesion.x dim {actual}; use the graph the checkpoint was trained on "
+            f"(data_ln_pc_ihc_g.pt = 34, data_ln_pc_ihc_g_r32.pt = 32)."
+        )
+
+
 def _split_indices_from_checkpoint(checkpoint: Dict[str, Any]) -> Dict[str, Any]:
     split_indices = {}
     if 'train_indices' in checkpoint:
@@ -203,6 +219,7 @@ def extract_latents_for_ddpm(
     checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     if 'model_state_dict' not in checkpoint or 'model_config' not in checkpoint:
         raise ValueError(f"Checkpoint is missing model_state_dict/model_config: {checkpoint_path}")
+    _check_lesion_dim(checkpoint, full_data, checkpoint_path)
 
     run_id = checkpoint.get('train_config', {}).get('run_id', checkpoint_path.parent.name)
     if artifact_path is None:
@@ -336,6 +353,7 @@ def extract_recommended_latents_for_ddpm(
     checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     if 'model_state_dict' not in checkpoint or 'model_config' not in checkpoint:
         raise ValueError(f"Checkpoint is missing model_state_dict/model_config: {checkpoint_path}")
+    _check_lesion_dim(checkpoint, full_data, checkpoint_path)
 
     if split_indices is None:
         split_indices = _split_indices_from_checkpoint(checkpoint)
