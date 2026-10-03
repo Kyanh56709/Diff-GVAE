@@ -1,5 +1,7 @@
 # FINAL RESULTS PACKAGE — Diff-GVAE (2026-08-10)
 
+> **Đã được thay thế (2026-10-03):** bộ số chốt hiện hành là `research/2026-10-03-canonical-r32/reports/final_results_package_r32.md` (canonical graph r32). File này giữ lại làm hồ sơ cho graph 34 chiều.
+
 Gói số liệu đã verify, sẵn sàng đưa vào FINAL_REPORT.md. Mọi số trỏ tới artifact (claim-verifier: Final verdict PASS, 9/9).
 
 ## 1. Dữ liệu & convention

@@ -135,8 +135,10 @@ Với latent tổng hợp, project còn có metric chất lượng phân phối 
 Runner hiện hành dùng file:
 
 ```text
-data_ln_pc_ihc_g.pt
+data_ln_pc_ihc_g_r32.pt
 ```
+
+Bản trước (`data_ln_pc_ihc_g.pt`, lesion 34 chiều) chứa 2 cột index (thứ tự dòng trong file, `lesion_index`) không phải radiomics và tương quan với nhãn; đã loại bỏ từ 2026-10-03, ablation cho thấy AUC không giảm.
 
 File này là một `torch_geometric.data.HeteroData` gồm hai node type:
 
@@ -150,7 +152,7 @@ Các edge type:
 - `('patient', 'has_lesion', 'lesion')`
 - `('patient', 'similar_to_radiology', 'patient')`
 
-Thông tin inspect trực tiếp từ `data_ln_pc_ihc_g.pt`:
+Thông tin inspect trực tiếp từ `data_ln_pc_ihc_g_r32.pt`:
 
 | Thành phần | Giá trị |
 |---|---:|
@@ -158,7 +160,7 @@ Thông tin inspect trực tiếp từ `data_ln_pc_ihc_g.pt`:
 | Số lesion | 333 |
 | `patient.x_clinical` | `(247, 22)` |
 | `patient.x_pathology` | `(247, 15)` |
-| `lesion.x` | `(333, 34)` |
+| `lesion.x` | `(333, 32)` |
 | `patient.binary_label` | 62 mẫu lớp 0, 185 mẫu lớp 1 |
 | `pathology_mask=True` | 105 patient |
 | `radiology_mask=True` | 187 patient |
@@ -182,7 +184,7 @@ Pathology là feature cấp patient. Dữ liệu chính có `patient.x_pathology
 
 ### Radiology
 
-Radiology ban đầu là feature cấp lesion, `lesion.x` kích thước `(333, 34)`. Trong GVAE, radiology không được đưa trực tiếp vào classifier ở cấp lesion. `RadiologyLesionAttentionAggregator` tổng hợp lesion features thành embedding cấp patient bằng attention theo lesion của từng patient. Embedding radiology cấp patient sau đó đi qua radiology VAE encoder.
+Radiology ban đầu là feature cấp lesion, `lesion.x` kích thước `(333, 32)` (32 đặc trưng radiomics/lesion). Trong GVAE, radiology không được đưa trực tiếp vào classifier ở cấp lesion. `RadiologyLesionAttentionAggregator` tổng hợp lesion features thành embedding cấp patient bằng attention theo lesion của từng patient. Embedding radiology cấp patient sau đó đi qua radiology VAE encoder.
 
 ## 3.3. Missing modality
 
@@ -441,20 +443,20 @@ Dữ liệu chính: `data_ln_pc_ihc_g.pt`, 247 patient, 5-fold stratified cross-
 
 ## 6.2. Kết quả GVAE direct prediction
 
-Kết quả từ `outputs/gvae/metrics/gvae_latent_quality_codex_20260615_204355/summary.json`:
+Kết quả chính (pooled-OOF — số chốt), từ `research/2026-10-03-canonical-r32/reports/final_results_package_r32.md` §2a:
 
-| Metric | Mean | Std |
-|---|---:|---:|
-| ROC-AUC | 0.6894 | 0.0537 |
-| PR-AUC | 0.8523 | 0.0326 |
-| Accuracy | 0.7409 | 0.0712 |
-| Balanced Accuracy | 0.7265 | 0.0418 |
-| Precision | 0.8826 | 0.0325 |
-| Recall | 0.7568 | 0.1209 |
-| F1-score | 0.8101 | 0.0641 |
-| Brier score | 0.2289 | 0.0129 |
+| Estimator | Metric | seed 42 [95% CI] | 5-seed mean ± sd |
+|---|---|---|---|
+| head | roc_auc | 0.6431 [0.5628-0.7272] | 0.6635 ± 0.0161 |
+| head | pr_auc | 0.8063 [0.7421-0.8803] | 0.8297 ± 0.0133 |
+| head | balanced_accuracy | 0.6285 [0.5613-0.6981] | 0.6493 ± 0.0147 |
+| head | f1 | 0.8022 [0.7558-0.8454] | 0.7771 ± 0.0182 |
+| probe | roc_auc | 0.6495 [0.5670-0.7313] | 0.6356 ± 0.0238 |
+| probe | pr_auc | 0.8221 [0.7600-0.8899] | 0.8084 ± 0.0234 |
+| probe | balanced_accuracy | 0.5878 [0.5131-0.6583] | 0.6224 ± 0.0241 |
+| probe | f1 | 0.7331 [0.6787-0.7845] | 0.7719 ± 0.0278 |
 
-Đây là kết quả của GVAE classifier head, tức mô hình dự đoán chính trong project.
+Protocol: pooled-OOF (outer fold chỉ để báo cáo, inner-val chọn checkpoint), CI bootstrap 2000 lần, positive = non-responder (label 1). Đây là kết quả của GVAE classifier head, tức mô hình dự đoán chính trong project.
 
 Project cũng có run GVAE trước đó `gvae_20260614_171332` với `checkpoint_metric = auc`, `epochs = 200`, `top_k_gvae_checkpoints = 5`. Kết quả run này:
 
@@ -472,16 +474,17 @@ Hai run này khác nhau về checkpoint metric và cấu hình epoch, nên khôn
 
 ## 6.3. Kết quả downstream và DDPM latent augmentation
 
-Kết quả DDPM augmentation được đọc từ `outputs/best_gvae_ddpm_result.json` và `summary.json` của run conditional DDPM. Tất cả dòng DDPM dưới đây là **kết quả downstream classifier sau latent augmentation**, không phải DDPM classifier.
+Kết quả DDPM augmentation trên canonical graph r32, run A2 full `conditional_latent_ddpm_from_gvae_bestparam_ranked_r32_20261003_124706_20261003_125733`; trích §3a của `research/2026-10-03-canonical-r32/reports/final_results_package_r32.md` (hàng real_only + 4 nhánh ROC cao nhất). Tất cả dòng DDPM dưới đây là **kết quả downstream classifier sau latent augmentation**, không phải DDPM classifier.
 
-| Thiết lập | ROC-AUC | PR-AUC | Accuracy | Balanced Accuracy | Precision | Recall | F1-score | Synthetic count TB | MMD TB |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Downstream real `concat_mu` only | 0.6705 | 0.8562 | 0.6793 | 0.6872 | 0.9024 | 0.6757 | 0.7293 | 0.0 | cần bổ sung |
-| Best by ROC-AUC: `both_classes`, ratio 0.5, unfiltered | 0.6805 | 0.8597 | 0.6638 | 0.6901 | 0.8988 | 0.6378 | 0.7142 | 98.6 | 0.0509 |
-| Best by Balanced Accuracy: `minority_only`, ratio 2.0, unfiltered | 0.6747 | 0.8590 | 0.7404 | 0.7052 | 0.8824 | 0.7784 | 0.7993 | 99.2 | 0.0519 |
-| Best by PR-AUC: `minority_only`, ratio 0.5, unfiltered | 0.6753 | 0.8631 | 0.6598 | 0.6930 | 0.9047 | 0.6270 | 0.7120 | 24.6 | 0.0934 |
+| Branch | ROC-AUC (±sd) | PR-AUC | BA | synthetic TB/fold | coverage | MMD | folds |
+|---|---|---|---|---|---|---|---|
+| real_only | 0.6982 ± 0.0359 | 0.8647 | 0.7046 | 0.0 | — | — | 5 |
+| both_classes r1 (filtered) | 0.7055 ± 0.0461 | 0.8694 | 0.7044 | 12.8 | 0.104 | 0.045 | 5 |
+| both_classes r0.25 | 0.7045 ± 0.0469 | 0.8675 | 0.7060 | 49.0 | 0.033 | 0.054 | 5 |
+| both_classes r2 (filtered) | 0.7035 ± 0.0437 | 0.8692 | 0.7043 | 28.8 | 0.188 | 0.025 | 5 |
+| both_classes r0.5 | 0.7016 ± 0.0744 | 0.8748 | 0.7020 | 98.6 | 0.076 | 0.046 | 5 |
 
-Ghi chú: các giá trị accuracy downstream được tính từ `fold_results` trong `summary.json` bằng trung bình metric `best_balanced_accuracy_threshold` của từng fold, vì `outputs/best_gvae_ddpm_result.json` không lưu sẵn mean accuracy.
+Kết luận: DDPM latent augmentation trên r32 là trung tính đến tiêu cực — **không branch nào vượt real_only của cùng run quá 1 sd**. Không so sánh số DDPM giữa r32 và 34 chiều vì real-only baseline khác nhau; mọi so sánh ở đây chỉ trong cùng một run (augmented so với real_only).
 
 ## 6.4. Diễn giải kết quả
 
@@ -545,7 +548,7 @@ Project `Diff-GVAE` xây dựng một pipeline đa phương thức cho bài toá
 
 DDPM trong thiết kế đúng không phải classifier. DDPM chỉ được dùng để học phân phối và sinh latent tổng hợp trong không gian `concat_mu`. Kết quả DDPM vì vậy cần được báo cáo như hiệu năng của downstream classifier sau khi thêm synthetic latent, không phải hiệu năng dự đoán của DDPM.
 
-Kết quả thực nghiệm hiện có cho thấy GVAE direct prediction đạt ROC-AUC 0.6894, PR-AUC 0.8523, balanced accuracy 0.7265 và F1-score 0.8101 trong run hiện hành theo `latent_quality`. Conditional DDPM augmentation có một số cấu hình đạt chỉ số downstream tốt hơn real latent only ở từng metric, nhưng chưa vượt GVAE direct prediction trong bảng kết quả chính. Hướng phát triển quan trọng nhất là chuẩn hóa dữ liệu, bổ sung provenance, loại bỏ nhầm lẫn DDPM-as-classifier, và cải thiện/thẩm định synthetic latent augmentation bằng protocol thực nghiệm chặt chẽ hơn.
+Kết quả thực nghiệm hiện có cho thấy GVAE (fusion head) đạt pooled-OOF ROC-AUC 0.6431 [0.5628-0.7272] (trung bình 5 seed 0.6635 ± 0.0161), PR-AUC 0.8063. Conditional DDPM augmentation có một số cấu hình đạt chỉ số downstream tốt hơn real latent only ở từng metric, nhưng chưa vượt GVAE direct prediction trong bảng kết quả chính. Hướng phát triển quan trọng nhất là chuẩn hóa dữ liệu, bổ sung provenance, loại bỏ nhầm lẫn DDPM-as-classifier, và cải thiện/thẩm định synthetic latent augmentation bằng protocol thực nghiệm chặt chẽ hơn.
 
 ---
 
