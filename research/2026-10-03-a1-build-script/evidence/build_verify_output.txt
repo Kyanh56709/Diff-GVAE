@@ -1,0 +1,22 @@
+cohort: 247 patients (TMB notna)
+clinical: 247 x 22; edges 1152
+pathology: (247, 15) (mask 105); edges 1016
+radiology: 333 lesions (187 patients); edges 652
+saved: data/ln_pc_ihc_g_rebuilt.pt
+
+--- verification vs data_ln_pc_ihc_g.pt ---
+  main_index                     PASS  
+  x_clinical_columns             PASS  
+  patient.x_clinical (247, 22)   PASS  maxdiff=0.000e+00
+  patient.x_pathology (247, 15)  PASS  maxdiff=0.000e+00
+  lesion.x (333, 34)             PASS  maxdiff=0.000e+00
+  pathology_mask                 PASS  sum=105
+  radiology_mask                 PASS  sum=187
+  binary_label                   PASS  
+  event                          PASS  
+  y                              PASS  nan=0
+  edge similar_to_clinical       PASS  edges=1152, attr maxdiff=0.000e+00
+  edge similar_to_pathology      PASS  edges=1016, attr maxdiff=0.000e+00
+  edge has_lesion                PASS  edges=333
+  edge similar_to_radiology      PASS  edges=652, attr maxdiff=0.000e+00
+VERDICT: ALL CHECKS PASS
