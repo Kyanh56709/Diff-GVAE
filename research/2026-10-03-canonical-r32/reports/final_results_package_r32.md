@@ -28,6 +28,8 @@ Thay thế `research/2026-08-06-project-review-audit/reports/final_results_packa
 | gvae_bestparam_ranked_r32_20261003_124706 | r32 | 0.6542 | 0.8437 | 0.7015 | 0.7178 |
 
 ## 3. DDPM latent augmentation (concat_mu, 600ep, g1.0, q0.95, rank 1 của gvae_bestparam_ranked_r32_20261003_124706)
+**Nguồn gốc checkpoint GVAE (tái lập):** run `gvae_bestparam_ranked_r32_20261003_124706` được tạo bằng `run_bestparam_ranked_r32.py` bản commit `6cdfcad`, khi script chưa đặt `train_config['run_id']`, nên checkpoint được lưu với tiền tố mặc định `seed_42_*`. Để runner DDPM (glob `{run_id}_fold_*_rank_1_*.pt`) tìm thấy, 5 file `seed_42_fold_{1..5}_rank_1_*.pt` đã được **sao chép** sang tên `gvae_bestparam_ranked_r32_20261003_124706_fold_{1..5}_rank_1_*.pt` (đã kiểm tra `cmp`: giống hệt từng byte). Commit `a63be5d` sửa script để đặt tên đúng ngay từ đầu. Chạy lại script đã sửa (run kiểm tra `gvae_bestparam_ranked_r32_20261003_133903`) **không** cho lại cùng checkpoint, vì pipeline không deterministic hoàn toàn (vd. latent_quality rank 1 fold 1: 0.5370 so với 0.5172; xem mục "Còn mở" 4 của `canonical_r32_report.md`). Run `133903` chỉ để kiểm tra tên file, không dùng cho số liệu nào ở đây. Nó là run GVAE mới nhất, nên runner DDPM luôn phải được gọi với `--gvae-run-id` tường minh.
+
 ### 3a. A2 full — run conditional_latent_ddpm_from_gvae_bestparam_ranked_r32_20261003_124706_20261003_125733
 | Branch | ROC-AUC (±sd) | PR-AUC | BA | synthetic TB/fold | coverage | MMD | folds |
 |---|---|---|---|---|---|---|---|
@@ -193,10 +195,10 @@ TSTR: mọi nhánh augmentation đều thấp hơn REAL_ONLY (0.6982); nhánh t�
 - Kết luận: DDPM latent augmentation trên r32 là trung tính đến tiêu cực — **không branch nào vượt real_only của cùng run quá 1 sd**. Không so sánh số DDPM giữa r32 và 34 chiều vì real-only baseline khác nhau; mọi so sánh ở đây chỉ trong cùng một run (augmented so với real_only).
 
 ## 5. Thay đổi so với package 34 chiều
+Chỉ so sánh số GVAE pooled-OOF: cùng protocol, cùng config, chỉ khác graph (so sánh 5 seed đầy đủ ở `canonical_r32_report.md`). Số DDPM **không** được so giữa hai graph: real-only baseline và checkpoint GVAE nguồn khác nhau, nên mọi so sánh DDPM chỉ có nghĩa trong cùng một run (§4).
+
 | Mục | 34 chiều (2026-08-10) | r32 (2026-10-03) |
 |---|---|---|
 | OOF head ROC (seed 42) | 0.6065 | 0.6431 |
 | OOF probe ROC (seed 42) | 0.6519 | 0.6495 |
-| DDPM real-only ROC | 0.7104 | A2 0.6982 / A5 0.7075 |
-| DDPM best unfiltered branch | both_classes r0.25 0.7050 (A2) | A2 both_classes r0.25 0.7045 / A5 minority_only r0.5 0.7079 |
-| TSTR both_classes r1.0 ROC | 0.6223 | 0.5485 |
+| DDPM: có nhánh nào vượt real_only của cùng run quá 1 sd? | Không | Không |

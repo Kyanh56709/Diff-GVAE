@@ -38,7 +38,7 @@ Project `Diff-GVAE` tập trung vào bài toán dự đoán đáp ứng điều 
 - `pathology`: đặc trưng mô bệnh học cấp bệnh nhân.
 - `radiology`: đặc trưng hình ảnh cấp lesion, sau đó được tổng hợp lên cấp bệnh nhân.
 
-Bài toán được cài đặt như bài toán phân lớp nhị phân với nhãn `patient.binary_label` trong file dữ liệu chính `data_ln_pc_ihc_g.pt`.
+Bài toán được cài đặt như bài toán phân lớp nhị phân với nhãn `patient.binary_label` trong file dữ liệu chính `data_ln_pc_ihc_g_r32.pt`.
 
 ## 1.2. Mục tiêu
 
@@ -198,7 +198,7 @@ Trong source code có utility `utils/data_utils.py` để:
 - tạo dense adjacency cho reconstruction loss.
 - hỗ trợ PCA theo train fold nếu được cấu hình.
 
-Tuy nhiên, project không có script raw-to-`HeteroData` để tái tạo `data_ln_pc_ihc_g.pt` từ dữ liệu clinical/pathology/radiology gốc. Vì vậy, các bước tiền xử lý thấp hơn như làm sạch raw data, tạo similarity edges, mã hóa feature và tạo label đều **cần bổ sung** nếu báo cáo yêu cầu đầy đủ quy trình dữ liệu.
+Graph được tạo lại từ dữ liệu gốc bằng `data/build_ln_pc_ihc_g.py` (`--drop-radiology-artifacts both` cho bản r32). Bản 34 chiều tái lập được bit-exact (maxdiff 0.0); similarity edge là cosine > 0.8 chỉ trên feature, không dùng nhãn.
 
 ## 3.5. Rủi ro dữ liệu
 
@@ -214,7 +214,7 @@ File này cũng có 247 patient và 333 lesion nhưng feature dimension khác:
 - `patient.x_pathology`: `(247, 137)`
 - `lesion.x`: `(333, 1671)`
 
-Quan trọng hơn, `binary_label` trong file này có phân bố ngược với `data_ln_pc_ihc_g.pt`: 185 mẫu lớp 0 và 62 mẫu lớp 1. Nếu thay đổi file dữ liệu mà không ghi rõ label polarity, kết quả có thể bị diễn giải sai. Báo cáo này xem `data_ln_pc_ihc_g.pt` là dữ liệu chính vì runner hiện hành mặc định load file này.
+Quan trọng hơn, `binary_label` trong file này có phân bố ngược với `data_ln_pc_ihc_g.pt`: 185 mẫu lớp 0 và 62 mẫu lớp 1. Nếu thay đổi file dữ liệu mà không ghi rõ label polarity, kết quả có thể bị diễn giải sai. Báo cáo này xem `data_ln_pc_ihc_g_r32.pt` là dữ liệu chính (cùng nhãn với `data_ln_pc_ihc_g.pt`: lớp 1 = non-responder, 185 mẫu); các runner hiện hành mặc định load file này.
 
 ---
 
@@ -224,7 +224,7 @@ Quan trọng hơn, `binary_label` trong file này có phân bố ngược với 
 
 Pipeline đúng hiện tại:
 
-1. Load `data_ln_pc_ihc_g.pt` dưới dạng `HeteroData`.
+1. Load `data_ln_pc_ihc_g_r32.pt` dưới dạng `HeteroData`.
 2. Chia patient bằng stratified k-fold theo `patient.binary_label`.
 3. Huấn luyện GVAE trên train fold.
 4. Đánh giá GVAE classifier head trên validation fold.
@@ -245,7 +245,7 @@ GVAE nhận dữ liệu đa phương thức và sinh response logit. Loss huấn
 - Structure reconstruction loss cho graph adjacency/subgraph.
 - KL divergence cho latent distribution.
 
-Run hiện hành `gvae_latent_quality_codex_20260615_204355` có cấu hình chính:
+Cấu hình dưới đây là của run cũ `gvae_latent_quality_codex_20260615_204355` (graph 34 chiều; artifact đã mất), giữ lại để minh họa các tham số. Cấu hình của các run cho số liệu chốt nằm trong `research/2026-10-03-radiology-artifact-ablation/scripts/run_oof.py` (pooled-OOF) và `research/2026-10-03-canonical-r32/scripts/run_bestparam_ranked_r32.py` (nguồn latent cho DDPM):
 
 - `n_splits = 5`
 - `epochs = 80`
@@ -394,7 +394,7 @@ outputs/gvae/train_conditional_ddpm_augmentation_runner.py
 
 Một số tham số mặc định:
 
-- `--data-path data_ln_pc_ihc_g.pt`
+- `--data-path data_ln_pc_ihc_g_r32.pt`
 - `--checkpoint-selector rank`
 - `--rank 1`
 - `--latent-key concat_mu`
@@ -433,13 +433,13 @@ Báo cáo này không chạy lại test suite; thông tin trên được tổng 
 
 ## 6.1. Thiết lập thực nghiệm
 
-Project có artifact thực nghiệm đã lưu trong `outputs/`. Báo cáo này dùng các kết quả có thật sau:
+Toàn bộ số liệu trong mục này lấy từ bộ số chốt `research/2026-10-03-canonical-r32/reports/final_results_package_r32.md` (A7, 2026-10-03):
 
-- GVAE run hiện hành: `gvae_latent_quality_codex_20260615_204355`
-- Conditional latent DDPM run: `conditional_latent_ddpm_from_gvae_latent_quality_codex_20260615_204355_20260615_213250`
-- File tổng hợp best result: `outputs/best_gvae_ddpm_result.json`
+- GVAE (số chính): pooled-OOF, 5 seed (42–46), các run `drop_both32_seed42`–`46` trong `research/2026-10-03-radiology-artifact-ablation/output/`.
+- Nguồn latent cho DDPM: checkpoint rank 1 của `gvae_bestparam_ranked_r32_20261003_124706`.
+- Conditional latent DDPM: run A2 `conditional_latent_ddpm_from_gvae_bestparam_ranked_r32_20261003_124706_20261003_125733` và A5 (PCA 32) `conditional_latent_ddpm_from_gvae_bestparam_ranked_r32_20261003_124706_20261003_130455`.
 
-Dữ liệu chính: `data_ln_pc_ihc_g.pt`, 247 patient, 5-fold stratified cross-validation.
+Dữ liệu chính: `data_ln_pc_ihc_g_r32.pt`, 247 patient, 5-fold stratified cross-validation.
 
 ## 6.2. Kết quả GVAE direct prediction
 
@@ -458,7 +458,7 @@ Kết quả chính (pooled-OOF — số chốt), từ `research/2026-10-03-canon
 
 Protocol: pooled-OOF (outer fold chỉ để báo cáo, inner-val chọn checkpoint), CI bootstrap 2000 lần, positive = non-responder (label 1). Đây là kết quả của GVAE classifier head, tức mô hình dự đoán chính trong project.
 
-Project cũng có run GVAE trước đó `gvae_20260614_171332` với `checkpoint_metric = auc`, `epochs = 200`, `top_k_gvae_checkpoints = 5`. Kết quả run này:
+Để tham khảo lịch sử (graph 34 chiều, val-fold mean, **không** so sánh được với số pooled-OOF ở trên): project từng có run GVAE `gvae_20260614_171332` với `checkpoint_metric = auc`, `epochs = 200`, `top_k_gvae_checkpoints = 5`. Kết quả run này:
 
 | Metric | Mean | Std |
 |---|---:|---:|
@@ -488,11 +488,11 @@ Kết luận: DDPM latent augmentation trên r32 là trung tính đến tiêu c�
 
 ## 6.4. Diễn giải kết quả
 
-Kết quả GVAE direct prediction của run `gvae_latent_quality_codex_20260615_204355` có balanced accuracy cao hơn run `gvae_20260614_171332`, trong khi run cũ có ROC-AUC và PR-AUC cao hơn. Điều này cho thấy việc chọn checkpoint theo metric khác nhau có thể thay đổi trade-off giữa ranking metric và thresholded metric.
+GVAE fusion head đạt pooled-OOF ROC-AUC trung bình 0.6635 ± 0.0161 qua 5 seed; CI 95% của seed 42 (0.5628–0.7272) rộng, phản ánh cỡ mẫu nhỏ (247 patient, 62 responder).
 
-Với DDPM augmentation, các cấu hình tốt nhất theo ROC-AUC/PR-AUC/Balanced Accuracy chỉ cải thiện nhẹ so với downstream real `concat_mu` only, và không vượt GVAE direct prediction trong bảng kết quả chính. Vì vậy, kết quả hiện tại ủng hộ cách hiểu DDPM là nhánh augmentation cần tinh chỉnh thêm, không phải thành phần thay thế GVAE classifier head.
+Số DDPM ở §6.3 là val-fold mean của một downstream logistic regression trên `concat_mu`, khác protocol với số GVAE pooled-OOF ở §6.2. Vì vậy **không** đặt hai bảng cạnh nhau để kết luận mô hình nào tốt hơn. Câu hỏi DDPM trả lời được chỉ là: thêm latent tổng hợp có giúp downstream classifier so với real latent của cùng run hay không. Câu trả lời trên r32 là không: không nhánh nào (A2, A5, retune filter A3) vượt real_only quá 1 sd, và ở kiểm tra TSTR (A4: train chỉ trên latent tổng hợp) mọi nhánh đều thấp hơn real-only (tốt nhất 0.6324 so với 0.6982).
 
-`outputs/best_gvae_ddpm_result.json` có ghi chú rằng filtered branches có thể trùng real-only khi toàn bộ generated samples bị loại bởi same-class kNN distance filtering. Điều này cho thấy synthetic latent hiện tại có thể nằm khá xa phân phối real train latent trong một số cấu hình.
+Filtered branch có thể giữ rất ít mẫu tổng hợp (vd. `minority_only` r0.25: 0.8 mẫu/fold) do lọc same-class kNN; cột synthetic TB/fold trong bộ số chốt cho phép nhận ra trường hợp này thay vì nhầm thành augmentation có lợi.
 
 ## 6.5. Lưu ý về legacy DDPM-as-classifier
 
@@ -516,16 +516,15 @@ Báo cáo này không xem nhánh legacy đó là pipeline chính, vì nó mâu t
 
 ## 7.2. Hạn chế
 
-- Chưa có script tạo `data_ln_pc_ihc_g.pt` từ raw data, nên provenance và data leakage trong graph construction chưa audit đầy đủ.
-- Chưa có mô tả rõ ý nghĩa của lớp 0/1 trong `binary_label`.
+- Graph construction đã có script build và đã audit không dùng nhãn (A1/A4), nhưng chưa có test set độc lập.
 - Có hai file graph với label polarity ngược nhau, tạo nguy cơ diễn giải sai.
 - `README.md` còn quá ngắn; `configs/config.py` trong repo hiện tại rỗng.
 - Các setting thực nghiệm nằm nhiều trong runner/script, chưa tập trung thành config tái lập hoàn chỉnh.
 - Legacy DDPM-as-classifier path vẫn tồn tại, dễ gây nhầm lẫn nếu chạy nhầm runner.
-- DDPM augmentation chưa cho thấy cải thiện rõ ràng so với GVAE direct prediction trong kết quả hiện có.
+- DDPM latent augmentation không cải thiện downstream classifier so với real latent của cùng run (không nhánh nào vượt quá 1 sd).
 - Kết quả hiện tại là cross-validation validation fold; chưa thấy held-out test set độc lập.
 - Thresholded metrics có thể optimistic nếu threshold được chọn trên cùng validation split.
-- Chưa có confidence interval/repeated CV/seed sweep để đánh giá độ ổn định.
+- Đã có bootstrap CI và 5 seed cho số GVAE, nhưng chưa có nested CV hay kiểm định thống kê giữa các cấu hình.
 
 ## 7.3. Hướng phát triển
 
@@ -548,7 +547,7 @@ Project `Diff-GVAE` xây dựng một pipeline đa phương thức cho bài toá
 
 DDPM trong thiết kế đúng không phải classifier. DDPM chỉ được dùng để học phân phối và sinh latent tổng hợp trong không gian `concat_mu`. Kết quả DDPM vì vậy cần được báo cáo như hiệu năng của downstream classifier sau khi thêm synthetic latent, không phải hiệu năng dự đoán của DDPM.
 
-Kết quả thực nghiệm hiện có cho thấy GVAE (fusion head) đạt pooled-OOF ROC-AUC 0.6431 [0.5628-0.7272] (trung bình 5 seed 0.6635 ± 0.0161), PR-AUC 0.8063. Conditional DDPM augmentation có một số cấu hình đạt chỉ số downstream tốt hơn real latent only ở từng metric, nhưng chưa vượt GVAE direct prediction trong bảng kết quả chính. Hướng phát triển quan trọng nhất là chuẩn hóa dữ liệu, bổ sung provenance, loại bỏ nhầm lẫn DDPM-as-classifier, và cải thiện/thẩm định synthetic latent augmentation bằng protocol thực nghiệm chặt chẽ hơn.
+Kết quả thực nghiệm hiện có cho thấy GVAE (fusion head) đạt pooled-OOF ROC-AUC 0.6431 [0.5628-0.7272] (trung bình 5 seed 0.6635 ± 0.0161), PR-AUC 0.8063. Conditional DDPM augmentation không cải thiện downstream classifier so với real latent của cùng run: không nhánh nào vượt real_only quá 1 sd (số DDPM là val-fold mean, không so trực tiếp với số GVAE pooled-OOF). Hướng phát triển quan trọng nhất là chuẩn hóa dữ liệu, bổ sung provenance, loại bỏ nhầm lẫn DDPM-as-classifier, và cải thiện/thẩm định synthetic latent augmentation bằng protocol thực nghiệm chặt chẽ hơn.
 
 ---
 
@@ -565,8 +564,8 @@ Kết quả thực nghiệm hiện có cho thấy GVAE (fusion head) đạt pool
 7. `training/latent_ddpm_augmentation.py` - pipeline conditional latent DDPM augmentation.
 8. `utils/latent_extraction.py` - trích xuất latent artifact cho DDPM.
 9. `utils/classification_eval.py` - tính metric phân lớp và artifact evaluation.
-10. `outputs/gvae/metrics/gvae_latent_quality_codex_20260615_204355/summary.json` - kết quả GVAE run hiện hành.
-11. `outputs/best_gvae_ddpm_result.json` - tổng hợp kết quả GVAE và conditional DDPM augmentation.
+10. `research/2026-10-03-canonical-r32/reports/final_results_package_r32.md` - bộ số chốt (A7): GVAE pooled-OOF 5 seed và DDPM A2/A5/A3/A4 trên graph r32.
+11. `research/2026-10-03-canonical-r32/reports/canonical_r32_report.md` - quyết định chuyển sang graph r32 và so sánh 5 seed giữa 34 và 32 chiều.
 
 ## 9.2. Tài liệu học thuật cần bổ sung
 
