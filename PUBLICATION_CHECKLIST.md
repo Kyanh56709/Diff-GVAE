@@ -29,13 +29,13 @@ Legend: `[ ]` todo · **(BLOCKING)** = nothing downstream is credible until done
 - [ ] **B2.** Add a **locked held-out test set** OR **nested CV** (outer test never touched for model selection). Current CV mixes selection and evaluation.
 - [ ] **B3.** Report **multiple seeds** (≥5) for GVAE and DDPM; report mean ± CI, not a single lucky run. — **Partial 2026-10-03:** GVAE pooled-OOF done for 5 seeds (42–46, mean ± sd in `final_results_package_r32.md` §2a). **Still open:** DDPM augmentation runs (A2/A5) are single-seed.
 - [ ] **B4.** State **threshold-selection protocol** explicitly. Thresholded metrics (F1, balanced accuracy) are currently tuned on the same validation split → optimistic. Either report threshold-free (AUC/AUPRC) as primary, or select threshold on train/inner-val only.
-- [ ] **B5.** Add **significance tests** for key comparisons (DeLong for AUC differences vs DyAM/XGBoost/SVM; paired test across folds for ablations).
+- [ ] **B5.** Add **significance tests** for key comparisons (DeLong for AUC differences vs DyAM/XGBoost/SVM; paired test across folds for ablations). — **Partial 2026-10-04:** DeLong paired tests (`review_fixes_2026_07/delong.py`) of GVAE head/probe vs 5 baselines on identical splits, 5 seeds, Holm-adjusted: no head-vs-baseline difference is significant (min p_holm 0.157); `research/2026-10-04-baselines-delong/reports/baselines_delong_report.md`. **Still open:** paired tests for ablations (C1) and DyAM.
 - [ ] **B6.** Report **AUPRC** prominently alongside AUC (class imbalance; prevalence is skewed).
 
 ## C. Core-method experiments & baselines (the science)
 
 - [ ] **C1.** Ablations with CIs (you have these — add stats): no-contrastive, no-GNN (MLP), unimodal, bimodal, full. Confirm each drop is significant.
-- [ ] **C2.** Baselines re-run under **identical CV/splits/seeds**: XGBoost, SVM, DyAM re-implementation, plus a **late-fusion concat + MLP** baseline (the "no alignment" control).
+- [ ] **C2.** Baselines re-run under **identical CV/splits/seeds**: XGBoost, SVM, DyAM re-implementation, plus a **late-fusion concat + MLP** baseline (the "no alignment" control). — **Partial 2026-10-04:** LR (clinical-only and concat), RBF-SVM, gradient-boosted trees (sklearn HistGradientBoosting in place of XGBoost, to keep the pinned env), and late-fusion MLP on the GVAE pooled-OOF splits, seeds 42–46 (`research/2026-10-04-baselines-delong/reports/baselines_delong_report.md`). Clinical-only LR has the highest mean ROC-AUC (0.707 ± 0.016 vs GVAE head 0.664 ± 0.016); not significant after Holm. **Still open:** DyAM re-implementation.
 - [ ] **C3.** Hyperparameter sensitivity (τ=0.2, embedding dim, heads, graph threshold 0.7 vs 0.8) → move from Supplementary claims to a real table with numbers.
 - [ ] **C4.** Complete-cohort robustness (N=366, AUC 0.711±0.080) — re-run under canonical pipeline, report with CI.
 - [ ] **C5.** Ablate the **lesion attention aggregator** vs mean/max pooling (currently only "likely contributes" — quantify it).

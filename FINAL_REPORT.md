@@ -472,6 +472,22 @@ Protocol: pooled-OOF (outer fold chỉ để báo cáo, inner-val chọn checkpo
 
 Hai run này khác nhau về checkpoint metric và cấu hình epoch, nên không nên xem như so sánh ablation công bằng nếu chưa có protocol rõ ràng hơn.
 
+### So sánh với baseline (C2/B5, 2026-10-04)
+
+Năm baseline không dùng graph được chạy trên **đúng split và seed** của pooled-OOF (seed 42–46, chọn hyperparameter trên inner-val), so với GVAE bằng kiểm định DeLong paired, hiệu chỉnh Holm. Chi tiết ở `research/2026-10-04-baselines-delong/reports/baselines_delong_report.md`. Bảng dưới là biến thể refit trên toàn bộ outer-train; biến thể chỉ fit trên inner-train (cân bằng dữ liệu với GVAE) cho cùng kết luận.
+
+| Mô hình | ROC-AUC 5 seed (mean ± sd) | PR-AUC mean |
+|---|---|---|
+| GVAE head | 0.6635 ± 0.0161 | 0.8297 |
+| GVAE probe | 0.6356 ± 0.0238 | 0.8084 |
+| Logistic regression, chỉ clinical | 0.7069 ± 0.0157 | 0.8626 |
+| Logistic regression, ghép 3 view | 0.6804 ± 0.0440 | 0.8471 |
+| SVM RBF, ghép 3 view | 0.6872 ± 0.0461 | 0.8527 |
+| Gradient boosting, ghép 3 view | 0.6802 ± 0.0268 | 0.8562 |
+| MLP late fusion, ghép 3 view | 0.6920 ± 0.0305 | 0.8704 |
+
+GVAE head không vượt baseline nào; logistic regression chỉ dùng clinical cao hơn GVAE head ở cả 5/5 seed. Không chênh lệch nào giữa GVAE head và baseline có ý nghĩa thống kê sau hiệu chỉnh Holm (p_holm nhỏ nhất 0.157), nhưng CI 95% của ΔAUC rộng khoảng ±0.065–0.10, nên kết luận đúng là "không phân biệt được", không phải "tương đương".
+
 ## 6.3. Kết quả downstream và DDPM latent augmentation
 
 Kết quả DDPM augmentation trên canonical graph r32, run A2 full `conditional_latent_ddpm_from_gvae_bestparam_ranked_r32_20261003_124706_20261003_125733`; trích §3a của `research/2026-10-03-canonical-r32/reports/final_results_package_r32.md` (hàng real_only + 4 nhánh ROC cao nhất). Tất cả dòng DDPM dưới đây là **kết quả downstream classifier sau latent augmentation**, không phải DDPM classifier.
@@ -522,7 +538,8 @@ Báo cáo này không xem nhánh legacy đó là pipeline chính, vì nó mâu t
 - DDPM latent augmentation không cải thiện downstream classifier so với real latent của cùng run (không nhánh nào vượt quá 1 sd).
 - Kết quả hiện tại là cross-validation validation fold; chưa thấy held-out test set độc lập.
 - Thresholded metrics có thể optimistic nếu threshold được chọn trên cùng validation split.
-- Đã có bootstrap CI và 5 seed cho số GVAE, nhưng chưa có nested CV hay kiểm định thống kê giữa các cấu hình.
+- Đã có bootstrap CI và 5 seed cho số GVAE, nhưng chưa có nested CV.
+- GVAE không vượt các baseline đơn giản trên cùng split; logistic regression chỉ dùng clinical đạt ROC-AUC trung bình cao hơn (0.707 so với 0.664), dù chênh lệch không có ý nghĩa thống kê sau hiệu chỉnh Holm (§6.2).
 
 ## 7.3. Hướng phát triển
 
@@ -545,7 +562,7 @@ Project `Diff-GVAE` xây dựng một pipeline đa phương thức cho bài toá
 
 DDPM trong thiết kế đúng không phải classifier. DDPM chỉ được dùng để học phân phối và sinh latent tổng hợp trong không gian `concat_mu`. Kết quả DDPM vì vậy cần được báo cáo như hiệu năng của downstream classifier sau khi thêm synthetic latent, không phải hiệu năng dự đoán của DDPM.
 
-Kết quả thực nghiệm hiện có cho thấy GVAE (fusion head) đạt pooled-OOF ROC-AUC 0.6431 [0.5628-0.7272] (trung bình 5 seed 0.6635 ± 0.0161), PR-AUC 0.8063. Conditional DDPM augmentation không cải thiện downstream classifier so với real latent của cùng run: không nhánh nào vượt real_only quá 1 sd (số DDPM là val-fold mean, không so trực tiếp với số GVAE pooled-OOF). Hướng phát triển quan trọng nhất là chuẩn hóa dữ liệu, bổ sung provenance, loại bỏ nhầm lẫn DDPM-as-classifier, và cải thiện/thẩm định synthetic latent augmentation bằng protocol thực nghiệm chặt chẽ hơn.
+Kết quả thực nghiệm hiện có cho thấy GVAE (fusion head) đạt pooled-OOF ROC-AUC 0.6431 [0.5628-0.7272] (trung bình 5 seed 0.6635 ± 0.0161), PR-AUC 0.8063. GVAE không vượt các baseline đơn giản chạy trên cùng split (logistic regression chỉ dùng clinical: 0.707 ± 0.016; không chênh lệch nào có ý nghĩa sau hiệu chỉnh Holm). Conditional DDPM augmentation không cải thiện downstream classifier so với real latent của cùng run: không nhánh nào vượt real_only quá 1 sd (số DDPM là val-fold mean, không so trực tiếp với số GVAE pooled-OOF). Hướng phát triển quan trọng nhất là chuẩn hóa dữ liệu, bổ sung provenance, loại bỏ nhầm lẫn DDPM-as-classifier, và cải thiện/thẩm định synthetic latent augmentation bằng protocol thực nghiệm chặt chẽ hơn.
 
 ---
 
@@ -564,6 +581,7 @@ Kết quả thực nghiệm hiện có cho thấy GVAE (fusion head) đạt pool
 9. `utils/classification_eval.py` - tính metric phân lớp và artifact evaluation.
 10. `research/2026-10-03-canonical-r32/reports/final_results_package_r32.md` - bộ số chốt (A7): GVAE pooled-OOF 5 seed và DDPM A2/A5/A3/A4 trên graph r32.
 11. `research/2026-10-03-canonical-r32/reports/canonical_r32_report.md` - quyết định chuyển sang graph r32 và so sánh 5 seed giữa 34 và 32 chiều.
+12. `research/2026-10-04-baselines-delong/reports/baselines_delong_report.md` - baseline không dùng graph trên cùng split + kiểm định DeLong (C2/B5).
 
 ## 9.2. Tài liệu học thuật cần bổ sung
 
