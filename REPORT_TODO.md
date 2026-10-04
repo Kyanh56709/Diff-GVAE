@@ -14,30 +14,28 @@
 
 ## 2. Thông tin dữ liệu
 
-| Mục | Lý do cần bổ sung |
+| Mục | Trạng thái (cập nhật 2026-10-04) |
 |---|---|
-| Ý nghĩa chính xác của `binary_label=0` và `binary_label=1` | Source code có label nhưng không mô tả rõ lớp nào là responder/non-responder. |
-| Mô tả cohort NSCLC | Chưa thấy thông tin về nguồn dữ liệu, tiêu chí chọn bệnh nhân, thời gian thu thập, inclusion/exclusion criteria. |
-| Định nghĩa clinical features | Code có 22 cột clinical, nhưng chưa có data dictionary từng cột. |
-| Định nghĩa pathology features | Project review nói pathology là GLCM texture features, nhưng chưa có danh sách feature chi tiết. |
-| Định nghĩa radiology lesion features | File chính có lesion feature 34 chiều, nhưng chưa có data dictionary. |
-| Raw-to-graph preprocessing script | Không tìm thấy script tạo `data_ln_pc_ihc_g.pt` từ raw data. |
-| Quy trình tạo similarity edges | Cần bổ sung cách tạo `similar_to_clinical`, `similar_to_pathology`, `similar_to_radiology`. |
-| Xử lý missing values raw | Chưa thấy tài liệu mô tả imputation/normalization trước khi serialize graph. |
-| Xác nhận label polarity của `data/data_247.pt` | File này có `binary_label` ngược với `data_ln_pc_ihc_g.pt`; cần xác nhận đây là file cũ, file lỗi hay label convention khác. |
+| Ý nghĩa `binary_label` | **Xong** — `1` = non-responder (185), `0` = responder (62); owner xác nhận 2026-08-06. Đã ghi vào `FINAL_REPORT.md` §3.1. |
+| Mô tả cohort NSCLC | **Còn mở** — nguồn dữ liệu, tiêu chí chọn bệnh nhân, thời gian thu thập, inclusion/exclusion. |
+| Định nghĩa clinical / pathology / radiology features | **Xong** — `research/2026-08-06-data-dictionary/`; thứ tự slot trong `data/build_ln_pc_ihc_g.py`. Canonical r32 có 32 radiomics/lesion. |
+| Raw-to-graph preprocessing script | **Xong** — `data/build_ln_pc_ihc_g.py` (tái lập bit-exact; `research/2026-10-03-a1-build-script/`). |
+| Quy trình tạo similarity edges | **Xong** — cosine > 0.8 chỉ trên feature, không đọc nhãn (A4). |
+| Xử lý missing values raw | **Xong (cần viết vào Methods)** — median/mode trên cohort cố định khi build, chỉ trên feature; scaler trong pipeline fit trên train fold (`tests/test_train_fold_only_fitting.py`). |
+| Label polarity của `data/data_247.pt` | **Xong** — file cũ, đã cách ly vào `deprecated/`. |
 
 ## 3. Thông tin thực nghiệm
 
-| Mục | Lý do cần bổ sung |
+| Mục | Trạng thái (cập nhật 2026-10-04) |
 |---|---|
-| Protocol chọn final run | Repo có nhiều run GVAE; cần ghi rõ run nào là final và vì sao. |
-| Held-out test set | Artifact hiện có là 5-fold train/validation; chưa thấy held-out test độc lập. |
-| Hardware/runtime | Cần bổ sung CPU/GPU, RAM, thời gian train nếu báo cáo yêu cầu. |
-| Seed sweep/repeated CV | Hiện có run theo seed chính; cần bổ sung để đánh giá độ ổn định. |
-| Confidence interval | Chưa có CI/bootstrap cho metric. |
-| Threshold selection protocol | Thresholded metrics có thể được tối ưu trên validation; cần quy định protocol báo cáo cuối cùng. |
-| Per-sample output cho DDPM/downstream | Nên lưu đầy đủ score, label, patient id để audit ROC/PR curve và calibration. |
-| Accuracy aggregate trong best DDPM artifact | `outputs/best_gvae_ddpm_result.json` không lưu mean accuracy; báo cáo đã tính lại từ `summary.json`, nên nên cập nhật artifact nếu cần tái lập trực tiếp. |
+| Protocol chọn final run | **Xong** — A7: `research/2026-10-03-canonical-r32/reports/final_results_package_r32.md`. |
+| Held-out test set | **Còn mở** — mới có pooled-OOF; chưa có nested CV hay test set độc lập (B2). |
+| Hardware/runtime | **Còn mở** (G5). |
+| Seed sweep/repeated CV | **Một phần** — GVAE 5 seed (42–46); DDPM mới 1 seed. |
+| Confidence interval | **Xong** — bootstrap 95% CI cho pooled-OOF. |
+| Threshold selection protocol | **Còn mở** (B4) — AUC/AUPRC là metric chính; cần chốt cách báo cáo F1/BA. |
+| Per-sample output | **Một phần** — GVAE: `oof_arrays.npz` (chưa lưu patient ID); DDPM: chỉ `summary.json` theo fold. |
+| Accuracy aggregate trong best DDPM artifact | **Lỗi thời** — bộ số chốt r32 dùng ROC/PR/BA, không dùng `outputs/best_gvae_ddpm_result.json`. |
 
 ## 4. Thông tin phương pháp
 
@@ -47,7 +45,7 @@
 | Lý do chọn `concat_mu` thay vì `concat_z`/`fused_cls_mu` | Project review yêu cầu `concat_mu`, nhưng nên bổ sung lý do thiết kế. |
 | Lý do chọn conditional DDPM | Cần bổ sung lập luận vì sao sinh latent có điều kiện theo class. |
 | Tiêu chí đánh giá synthetic latent | Có MMD/kNN/coverage trong code, nhưng cần chọn metric nào là chính. |
-| Xử lý legacy DDPM-as-classifier | Nên loại bỏ hoặc đưa vào deprecated để tránh chạy nhầm. |
+| Xử lý legacy DDPM-as-classifier | **Xong** — đã cách ly vào `deprecated/`. |
 
 ## 5. Tài liệu tham khảo
 
@@ -62,10 +60,10 @@
 
 ## 6. Việc nên làm trước khi nộp
 
-1. Xác nhận ý nghĩa lớp positive/negative của `binary_label`.
-2. Chọn một run GVAE final và một run DDPM augmentation final để đưa vào báo cáo.
-3. Bổ sung data dictionary cho clinical/pathology/radiology features.
-4. Bổ sung hoặc mô tả quy trình tạo `HeteroData`.
-5. Chạy lại hoặc xác minh test suite nếu cần báo cáo tính đúng đắn cài đặt.
-6. Cập nhật README/config để người khác có thể tái lập thực nghiệm.
-7. Bổ sung tài liệu tham khảo học thuật đúng format yêu cầu.
+Đã xong: chốt nhãn, chọn run final (A7), data dictionary, script tạo `HeteroData`, test suite (96 passed, 2026-10-04), pin requirements + `configs/config.py`.
+
+Còn lại:
+1. Điền thông tin hành chính (§1).
+2. Mô tả cohort (§2).
+3. Bổ sung tài liệu tham khảo học thuật đúng format yêu cầu (§5).
+4. Lý do thiết kế ở §4 (GVAE, `concat_mu`, conditional DDPM, metric chính cho synthetic latent).

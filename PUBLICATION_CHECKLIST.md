@@ -25,9 +25,9 @@ Legend: `[ ]` todo · **(BLOCKING)** = nothing downstream is credible until done
 
 ## B. Statistical rigor
 
-- [ ] **B1.** Replace fold SD (±0.039) with **bootstrap 95% CIs** on all headline metrics.
+- [x] **B1.** Replace fold SD (±0.039) with **bootstrap 95% CIs** on all headline metrics. — **Done 2026-10-03:** pooled-OOF bootstrap 95% CIs in `oof_metrics_with_ci.json` per seed (`research/2026-10-03-radiology-artifact-ablation/output/drop_both32_seed4{2..6}/`); headline table in `research/2026-10-03-canonical-r32/reports/final_results_package_r32.md` §2a.
 - [ ] **B2.** Add a **locked held-out test set** OR **nested CV** (outer test never touched for model selection). Current CV mixes selection and evaluation.
-- [ ] **B3.** Report **multiple seeds** (≥5) for GVAE and DDPM; report mean ± CI, not a single lucky run.
+- [ ] **B3.** Report **multiple seeds** (≥5) for GVAE and DDPM; report mean ± CI, not a single lucky run. — **Partial 2026-10-03:** GVAE pooled-OOF done for 5 seeds (42–46, mean ± sd in `final_results_package_r32.md` §2a). **Still open:** DDPM augmentation runs (A2/A5) are single-seed.
 - [ ] **B4.** State **threshold-selection protocol** explicitly. Thresholded metrics (F1, balanced accuracy) are currently tuned on the same validation split → optimistic. Either report threshold-free (AUC/AUPRC) as primary, or select threshold on train/inner-val only.
 - [ ] **B5.** Add **significance tests** for key comparisons (DeLong for AUC differences vs DyAM/XGBoost/SVM; paired test across folds for ablations).
 - [ ] **B6.** Report **AUPRC** prominently alongside AUC (class imbalance; prevalence is skewed).
@@ -74,12 +74,12 @@ Legend: `[ ]` todo · **(BLOCKING)** = nothing downstream is credible until done
 
 ## H. Reproducibility & code release
 
-- [ ] **H1.** Public, runnable repo: pinned `requirements.txt` + exact torch/torch-geometric/torch-scatter versions, seeds, config files (the empty `configs/config.py` must be populated).
+- [x] **H1.** Public, runnable repo: pinned `requirements.txt` + exact torch/torch-geometric/torch-scatter versions, seeds, config files (the empty `configs/config.py` must be populated). — **Done 2026-10-03** (`6add390`): exact pins in `requirements.txt` (Python 3.9.6, torch 2.8.0, torch_geometric 2.6.1, torch_scatter 2.1.2); `configs/config.py` holds canonical paths + build constants (not yet imported by the pipeline). Making the repo public belongs to G3.
 - [ ] **H2.** One-command reproduction script for the **canonical** GVAE + DDPM runs.
-- [ ] **H3.** Remove/quarantine deprecated DDPM-as-classifier path (`train_pipeline.py`) into a `deprecated/` folder so reviewers don't mistake it for the method.
-- [ ] **H4.** Data dictionary: clinical (22 cols), pathology (GLCM features), radiology (34 radiomics) — define every feature.
-- [ ] **H5.** Save per-sample outputs (scores, labels, patient IDs) for audit of ROC/PR/calibration.
-- [ ] **H6.** Run the existing test suite; report pass status.
+- [x] **H3.** Remove/quarantine deprecated DDPM-as-classifier path (`train_pipeline.py`) into a `deprecated/` folder so reviewers don't mistake it for the method. — **Done:** `deprecated/train_pipeline.py` + legacy runners, documented in `deprecated/README.md`; guarded by `tests/test_deprecated_layout.py`.
+- [x] **H4.** Data dictionary: clinical (22 cols), pathology (GLCM features), radiology (34 radiomics) — define every feature. — **Done:** `research/2026-08-06-data-dictionary/` (`build_dictionary.py` regenerates the CSVs); exact slot→column order in `data/build_ln_pc_ihc_g.py` (`PATHOLOGY_FEATURES`, `RADIOLOGY_FEATURES`; canonical r32 has 32 radiology slots).
+- [ ] **H5.** Save per-sample outputs (scores, labels, patient IDs) for audit of ROC/PR/calibration. — **Partial:** GVAE scores + labels in `oof_arrays.npz` (y_true, head_probs, probe_probs; 247 entries, no explicit patient-ID array) + `oof_per_fold.csv` per seed in `research/2026-10-03-radiology-artifact-ablation/output/drop_both32_seed4{2..6}/`. **Still open:** save patient IDs alongside the scores; DDPM runs keep per-fold `summary.json` only.
+- [x] **H6.** Run the existing test suite; report pass status. — **Done 2026-10-04:** `.venv/bin/python -m pytest` → 96 passed.
 
 ## I. Manuscript completeness (fix before submission)
 

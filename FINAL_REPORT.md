@@ -165,7 +165,7 @@ Thông tin inspect trực tiếp từ `data_ln_pc_ihc_g_r32.pt`:
 | `pathology_mask=True` | 105 patient |
 | `radiology_mask=True` | 187 patient |
 
-Ý nghĩa lâm sàng chính xác của `binary_label=0` và `binary_label=1` chưa được mô tả rõ trong source code. Phần này **cần bổ sung**.
+Quy ước nhãn (owner xác nhận 2026-08-06): `binary_label=1` = **non-responder** (185), `binary_label=0` = **responder** (62). Positive class trong mọi metric là nhãn 1; khi báo cáo theo "responder" phải lật nhãn (1−y) cho PR-AUC/F1/sensitivity/specificity.
 
 ## 3.2. Các modality
 
@@ -180,7 +180,7 @@ Trong reconstruction loss, phần liên tục dùng MSE, phần nhị phân dùn
 
 ### Pathology
 
-Pathology là feature cấp patient. Dữ liệu chính có `patient.x_pathology` kích thước `(247, 15)`. `PROJECT_REVIEW.md` mô tả đây là các texture feature GLCM. Danh sách và ý nghĩa từng feature **cần bổ sung**.
+Pathology là feature cấp patient. Dữ liệu chính có `patient.x_pathology` kích thước `(247, 15)`. Đây là 15 thống kê (skewness/kurtosis/variance/lognorm-fit) của các texture feature GLCM trên kênh 1, lấy từ `data/glcm_features.csv`; danh sách cột theo đúng thứ tự slot nằm ở `PATHOLOGY_FEATURES` trong `data/build_ln_pc_ihc_g.py`. Data dictionary cho cả ba view: `research/2026-08-06-data-dictionary/` (`build_dictionary.py` + `data_dictionary_summary.md`).
 
 ### Radiology
 
@@ -496,7 +496,7 @@ Filtered branch có thể giữ rất ít mẫu tổng hợp (vd. `minority_only
 
 ## 6.5. Lưu ý về legacy DDPM-as-classifier
 
-Repo vẫn còn code legacy trong `training/train_pipeline.py` và một số runner cũ. Nhánh này huấn luyện DDPM riêng cho responder/non-responder và biến denoising loss thành score/probability. Code đã chặn mặc định nếu không bật `allow_deprecated_ddpm_classifier`.
+Code legacy đã được cách ly vào `deprecated/` (`deprecated/train_pipeline.py` và các runner cũ; xem `deprecated/README.md`). Nhánh này huấn luyện DDPM riêng cho responder/non-responder và biến denoising loss thành score/probability. Code đã chặn mặc định nếu không bật `allow_deprecated_ddpm_classifier`.
 
 Báo cáo này không xem nhánh legacy đó là pipeline chính, vì nó mâu thuẫn với mục tiêu hiện tại: DDPM không phải classifier và không được dùng để dự đoán response.
 
@@ -517,10 +517,8 @@ Báo cáo này không xem nhánh legacy đó là pipeline chính, vì nó mâu t
 ## 7.2. Hạn chế
 
 - Graph construction đã có script build và đã audit không dùng nhãn (A1/A4), nhưng chưa có test set độc lập.
-- Có hai file graph với label polarity ngược nhau, tạo nguy cơ diễn giải sai.
-- `README.md` còn quá ngắn; `configs/config.py` trong repo hiện tại rỗng.
-- Các setting thực nghiệm nằm nhiều trong runner/script, chưa tập trung thành config tái lập hoàn chỉnh.
-- Legacy DDPM-as-classifier path vẫn tồn tại, dễ gây nhầm lẫn nếu chạy nhầm runner.
+- `README.md` còn ngắn; `configs/config.py` đã chứa đường dẫn canonical và các hằng số build (ngưỡng 0.8, seed, kích thước cohort) nhưng chưa module nào import.
+- Các setting thực nghiệm nằm nhiều trong runner/script, chưa tập trung thành config tái lập hoàn chỉnh; chưa có script tái lập một lệnh (H2).
 - DDPM latent augmentation không cải thiện downstream classifier so với real latent của cùng run (không nhánh nào vượt quá 1 sd).
 - Kết quả hiện tại là cross-validation validation fold; chưa thấy held-out test set độc lập.
 - Thresholded metrics có thể optimistic nếu threshold được chọn trên cùng validation split.

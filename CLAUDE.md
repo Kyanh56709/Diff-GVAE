@@ -16,7 +16,7 @@ Diff-GVAE is a PyTorch-based multi-view GVAE pipeline. Patients have up to 3 vie
 
 ## Running Training
 
-The primary entry point is `training.ipynb`. The notebook sets device, loads data, defines configs, then calls:
+The owner's notebook `training_local.ipynb` (git-ignored; still loads the legacy 34-dim graph) sets device, loads data, defines configs, then calls:
 
 ```python
 from training.train_gvae import kfold_train_gvae
@@ -47,7 +47,7 @@ summary = run_conditional_latent_augmentation_pipeline(
 | `training/train_gvae.py` | `pretrain_radiology_aggregator()` | Pre-trains `RadiologyLesionAttentionAggregator` as a MIL classifier on lesion features |
 | `training/train_ddpm.py` | `train_single_unconditional_ddpm()` | Legacy helper; do not use for DDPM-as-classifier results |
 | `training/latent_ddpm_augmentation.py` | `run_conditional_latent_augmentation_pipeline()` | End-to-end DDPM augmentation: extract `concat_mu` → train conditional DDPM on train fold → generate synthetic latents → evaluate downstream classifier |
-| `training/train_pipeline.py` | `kfold_gvae_ddpm_generative_classifier()` | Deprecated and disabled by default because it treats DDPM loss as a classifier score |
+| `deprecated/train_pipeline.py` | `kfold_gvae_ddpm_generative_classifier()` | Quarantined in `deprecated/` and disabled by default because it treats DDPM loss as a classifier score |
 | `models/gvae_model.py` | `GVAE.forward()` | Per-view VAE encoding → fusion + classification; handles missing views via `missing_strategy` |
 | `models/gvae_model.py` | `get_all_view_mus_from_gvae()` | Extract mu vectors per view for downstream DDPM training |
 | `utils/data_utils.py` | `get_view_subgraph_and_features()` | Extracts patient-level features and local subgraph for a given view |
