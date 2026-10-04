@@ -84,3 +84,6 @@ image.png
 research/**/oof_arrays.npz
 research/2026-08-06-external-datasets/sources/raw/*
 !research/2026-08-06-external-datasets/sources/raw/README.md
+
+# External cohorts (e.g. I3LUNG, CC-BY-NC-4.0) stay local; see Loan_agents.md.
+data/external/
