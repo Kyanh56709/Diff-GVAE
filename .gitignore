@@ -77,3 +77,10 @@ docs/
 nul
 image.png
 
+
+# Kept local only (repo is public): per-patient OOF labels/scores
+# (regenerate with the run_oof.py / pipeline_phase4a_oof.sh scripts) and
+# third-party downloads from the external-dataset search (sources listed in raw/README.md).
+research/**/oof_arrays.npz
+research/2026-08-06-external-datasets/sources/raw/*
+!research/2026-08-06-external-datasets/sources/raw/README.md
