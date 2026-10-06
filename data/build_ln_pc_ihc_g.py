@@ -437,6 +437,12 @@ def main():
     parser.add_argument("--out", default=str(root / "data/ln_pc_ihc_g_rebuilt.pt"))
     parser.add_argument("--verify", default=None, help="canonical .pt to compare against")
     parser.add_argument(
+        "--cohort",
+        choices=("tmb", "all"),
+        default="tmb",
+        help="'tmb' = canonical 247 (TMB not-null); 'all' = full cohort (366)",
+    )
+    parser.add_argument(
         "--drop-radiology-artifacts",
         choices=RADIOLOGY_ARTIFACT_MODES,
         default="none",
@@ -445,16 +451,21 @@ def main():
     args = parser.parse_args()
     if args.verify and args.drop_radiology_artifacts != "none":
         parser.error("--verify compares against the canonical 34-slot graph; use it only with --drop-radiology-artifacts none")
+    if args.verify and args.cohort != "tmb":
+        parser.error("--verify compares against the canonical 247 cohort; use it only with --cohort tmb")
 
     if args.verify and Path(args.out).resolve() == Path(args.verify).resolve():
         parser.error("--out and --verify must resolve to different files (refusing to clobber the canonical graph)")
 
     # ---- cohort ----
     df_clin = pd.read_csv(args.clinical, index_col="main_index")
-    df_clin = df_clin[df_clin["TMB"].notna()].copy()
+    if args.cohort == "tmb":
+        df_clin = df_clin[df_clin["TMB"].notna()].copy()
+    else:
+        df_clin = df_clin.copy()
     patient_order = df_clin.index.tolist()
     n_patients = len(patient_order)
-    print(f"cohort: {n_patients} patients (TMB notna)")
+    print(f"cohort: {n_patients} patients (cohort={args.cohort})")
 
     # ---- clinical ----
     clin_matrix, clf_columns, clin_edges = build_clinical(df_clin, patient_order)

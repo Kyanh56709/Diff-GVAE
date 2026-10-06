@@ -49,3 +49,21 @@ def test_artifact_ablation_only_drops_index_slots(tmp_path, mode, dropped):
 def test_verify_refuses_ablation_mode(tmp_path):
     proc = _build(tmp_path / "x.pt", "--drop-radiology-artifacts", "both", "--verify", str(CANONICAL))
     assert proc.returncode != 0
+
+
+def test_cohort_all_builds_full_366(tmp_path):
+    proc = _build(tmp_path / "all.pt", "--cohort", "all")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    g = torch.load(tmp_path / "all.pt", weights_only=False)
+    assert g["patient"].num_nodes == 366
+    assert g["patient"].x_clinical.shape[0] == 366
+    canon = torch.load(CANONICAL, weights_only=False)
+    # the canonical 247 (TMB not-null) cohort is a subset of the full cohort
+    assert set(canon["patient"].main_index).issubset(set(g["patient"].main_index))
+    # every patient carries a real label/event (no invented classes)
+    assert bool(torch.isfinite(g["patient"].y).all())
+
+
+def test_verify_refuses_cohort_all(tmp_path):
+    proc = _build(tmp_path / "y.pt", "--cohort", "all", "--verify", str(CANONICAL))
+    assert proc.returncode != 0
