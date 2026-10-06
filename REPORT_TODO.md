@@ -29,11 +29,11 @@
 | Mục | Trạng thái (cập nhật 2026-10-04) |
 |---|---|
 | Protocol chọn final run | **Xong** — A7: `research/2026-10-03-canonical-r32/reports/final_results_package_r32.md`. |
-| Held-out test set | **Còn mở** — mới có pooled-OOF; chưa có nested CV hay test set độc lập (B2). |
+| Held-out test set | **Xong phần nested CV (B2)** — outer fold report-only (checkpoint + threshold trên inner-val) đã có trong `kfold_evaluate_gvae_classifier`; nested CV chọn hyperparameter theo inner-val cho head AUC 0.6603 ± 0.0460 vs cấu hình cố định 0.6531 ± 0.0113 (5 seed, mỗi seed seed lại độc lập) → Δ +0.007 nằm trong sd, không thổi phồng kết quả; test set độc lập vẫn không khả thi (hạn chế dữ liệu). `research/2026-10-06-nested-cv-hparam/reports/nested_cv_report.md`. |
 | Hardware/runtime | **Còn mở** (G5). |
 | Seed sweep/repeated CV | **Một phần** — GVAE 5 seed (42–46); DDPM mới 1 seed. |
 | Confidence interval | **Xong** — bootstrap 95% CI cho pooled-OOF. |
-| Threshold selection protocol | **Còn mở** (B4) — AUC/AUPRC là metric chính; cần chốt cách báo cáo F1/BA. |
+| Threshold selection protocol | **Xong (B4)** — AUC/PR-AUC là metric chính (threshold-free); F1/BA dùng ngưỡng chọn trên inner-val (`_threshold_max_f1`, `training/train_gvae.py:2243`); caveat optimism ghi ở `utils/classification_eval.py`. `research/2026-10-06-internal-validity-methods/reports/internal_validity_methods.md` §3. |
 | Per-sample output | **Một phần** — GVAE: `oof_arrays.npz` (chưa lưu patient ID); DDPM: chỉ `summary.json` theo fold. |
 | Accuracy aggregate trong best DDPM artifact | **Lỗi thời** — bộ số chốt r32 dùng ROC/PR/BA, không dùng `outputs/best_gvae_ddpm_result.json`. |
 
