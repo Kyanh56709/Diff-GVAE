@@ -16,6 +16,11 @@ Diff-GVAE is a PyTorch-based multi-view GVAE pipeline. Patients have up to 3 vie
 
 ## Running Training
 
+**Canonical end-to-end reproduction (H2):** `python reproduce_canonical.py` builds the
+r32 graph, runs the pooled-OOF GVAE (seeds 42–46), the best-params ranked GVAE, and the
+conditional-latent DDPM chain; use `--dry-run` to print the commands, `--steps` to run a
+subset (`graph,validate,oof,gvae-latent,ddpm`).
+
 The owner's notebook `training_local.ipynb` (git-ignored; still loads the legacy 34-dim graph) sets device, loads data, defines configs, then calls:
 
 ```python

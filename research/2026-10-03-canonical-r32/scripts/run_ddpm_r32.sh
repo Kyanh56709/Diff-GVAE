@@ -4,6 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 D=research/2026-10-03-canonical-r32
+mkdir -p "$D/output/logs"
 PY=.venv/bin/python
 export OMP_NUM_THREADS=3 MKL_NUM_THREADS=3
 GVAE_RUN=$(cat $D/output/bestparam_ranked_r32_run_id.txt)
