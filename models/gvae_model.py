@@ -36,7 +36,8 @@ class GVAE (nn.Module):
                 patient_embed_dim=radiology_aggregator_config['aggregated_output_dim'],
                 attention_hidden_dim=radiology_aggregator_config.get(
                     'attention_hidden_dim'),
-                dropout=radiology_aggregator_config.get('dropout', 0.1)
+                dropout=radiology_aggregator_config.get('dropout', 0.1),
+                pooling=radiology_aggregator_config.get('pooling', 'attention'),
             )
             if view_configs['radiology']['in_channels'] != radiology_aggregator_config['aggregated_output_dim']:
                 raise ValueError(
@@ -63,7 +64,8 @@ class GVAE (nn.Module):
                 config.get('heads', 4), config.get('dropout', 0.3),
                 config.get('num_gnn_layers_vae', config.get('num_gnn_layers', 2)),
                 config.get('edge_dim', -1),
-                logvar_clamp=logvar_clamp
+                logvar_clamp=logvar_clamp,
+                encoder_type=config.get('encoder_type', 'gat'),
             )
             self.structure_decoders[view] = StructureDecoder()
             self.attribute_decoders[view] = AttributeDecoder(

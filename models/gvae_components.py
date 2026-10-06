@@ -14,7 +14,7 @@ class ViewEncoder(nn.Module):
 
     def __init__(self, in_channels: int, hidden_channels: int, latent_dim: int,
                  heads: int = 4, dropout: float = 0.5, num_gnn_layers: int = 2, edge_dim: int = -1,
-                 logvar_clamp=None):
+                 logvar_clamp=None, encoder_type: str = 'gat'):
         """
         Args:
             in_channels: Dimensionality of input node features for this view.
@@ -25,29 +25,46 @@ class ViewEncoder(nn.Module):
             num_gnn_layers: Number of GATv2Conv layers (supports 1 or 2).
             edge_dim: Dimensionality of edge features (-1 if no edge features).
             logvar_clamp: Optional (min, max) tuple to clamp logvar values.
+            encoder_type: 'gat' (default; GATv2 message passing) or 'mlp'
+                (graph-agnostic ablation: a plain MLP that ignores edges).
         """
         super().__init__()
         if num_gnn_layers not in [1, 2]:
             raise ValueError(
                 "ViewEncoder currently supports 1 or 2 GNN layers.")
+        if encoder_type not in ("gat", "mlp"):
+            raise ValueError("encoder_type must be 'gat' or 'mlp'.")
 
         self.num_gnn_layers = num_gnn_layers
+        self.encoder_type = encoder_type
         self.dropout_p = dropout
         self.logvar_clamp = logvar_clamp
 
-        current_dim = hidden_channels
+        if encoder_type == "mlp":
+            # No message passing: MLP on node features. Width matches the GAT
+            # output (hidden * heads) so fc_mu/fc_logvar keep the same input dim.
+            width = hidden_channels * heads
+            self.mlp1 = Linear(in_channels, width)
+            self.bn1 = LayerNorm(width)
+            current_dim = width
+            if num_gnn_layers > 1:
+                self.mlp2 = Linear(width, width)
+                self.bn2 = LayerNorm(width)
+                current_dim = width
+        else:
+            current_dim = hidden_channels
 
-        self.conv1 = GATv2Conv(in_channels, hidden_channels, heads=heads, concat=True,
-                               dropout=dropout, edge_dim=edge_dim, add_self_loops=True)
-        self.bn1 = LayerNorm(hidden_channels * heads)
-        current_dim = hidden_channels * heads
-
-        if num_gnn_layers > 1:
-
-            self.conv2 = GATv2Conv(hidden_channels * heads, hidden_channels, heads=heads, concat=True,
+            self.conv1 = GATv2Conv(in_channels, hidden_channels, heads=heads, concat=True,
                                    dropout=dropout, edge_dim=edge_dim, add_self_loops=True)
-            self.bn2 = LayerNorm(hidden_channels * heads)
+            self.bn1 = LayerNorm(hidden_channels * heads)
             current_dim = hidden_channels * heads
+
+            if num_gnn_layers > 1:
+
+                self.conv2 = GATv2Conv(hidden_channels * heads, hidden_channels, heads=heads, concat=True,
+                                       dropout=dropout, edge_dim=edge_dim, add_self_loops=True)
+                self.bn2 = LayerNorm(hidden_channels * heads)
+                current_dim = hidden_channels * heads
 
         self.fc_mu = Linear(current_dim, latent_dim)
         self.fc_logvar = Linear(current_dim, latent_dim)
@@ -55,11 +72,18 @@ class ViewEncoder(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.conv1.reset_parameters()
-        self.bn1.reset_parameters()
-        if self.num_gnn_layers > 1:
-            self.conv2.reset_parameters()
-            self.bn2.reset_parameters()
+        if self.encoder_type == "mlp":
+            self.mlp1.reset_parameters()
+            self.bn1.reset_parameters()
+            if self.num_gnn_layers > 1:
+                self.mlp2.reset_parameters()
+                self.bn2.reset_parameters()
+        else:
+            self.conv1.reset_parameters()
+            self.bn1.reset_parameters()
+            if self.num_gnn_layers > 1:
+                self.conv2.reset_parameters()
+                self.bn2.reset_parameters()
         self.fc_mu.reset_parameters()
         self.fc_logvar.reset_parameters()
 
@@ -75,18 +99,29 @@ class ViewEncoder(nn.Module):
             mu: Latent mean [num_nodes, latent_dim].
             logvar: Latent log variance [num_nodes, latent_dim].
         """
-        # Layer 1
-        x = self.conv1(x, edge_index, edge_attr=edge_attr)
-        x = self.bn1(x)
-        x = F.elu(x)
-        x = F.dropout(x, p=self.dropout_p, training=self.training)
-
-        # Layer 2 (if exists)
-        if self.num_gnn_layers == 2:
-            x = self.conv2(x, edge_index, edge_attr=edge_attr)
-            x = self.bn2(x)
+        if self.encoder_type == "mlp":
+            x = self.mlp1(x)
+            x = self.bn1(x)
             x = F.elu(x)
             x = F.dropout(x, p=self.dropout_p, training=self.training)
+            if self.num_gnn_layers == 2:
+                x = self.mlp2(x)
+                x = self.bn2(x)
+                x = F.elu(x)
+                x = F.dropout(x, p=self.dropout_p, training=self.training)
+        else:
+            # Layer 1
+            x = self.conv1(x, edge_index, edge_attr=edge_attr)
+            x = self.bn1(x)
+            x = F.elu(x)
+            x = F.dropout(x, p=self.dropout_p, training=self.training)
+
+            # Layer 2 (if exists)
+            if self.num_gnn_layers == 2:
+                x = self.conv2(x, edge_index, edge_attr=edge_attr)
+                x = self.bn2(x)
+                x = F.elu(x)
+                x = F.dropout(x, p=self.dropout_p, training=self.training)
 
         # Output Projections
         mu = self.fc_mu(x)
@@ -465,10 +500,14 @@ class FusionAndClassifierHead(nn.Module):
 
 class RadiologyLesionAttentionAggregator(nn.Module):
     def __init__(self, lesion_feature_dim: int, patient_embed_dim: int,
-                 attention_hidden_dim: Optional[int] = None, dropout: float = 0.1):
+                 attention_hidden_dim: Optional[int] = None, dropout: float = 0.1,
+                 pooling: str = 'attention'):
         super().__init__()
         self.lesion_feature_dim = lesion_feature_dim
         self.patient_embed_dim = patient_embed_dim
+        if pooling not in ("attention", "mean", "max"):
+            raise ValueError("pooling must be 'attention', 'mean' or 'max'.")
+        self.pooling = pooling
 
         if attention_hidden_dim is None:
             attention_hidden_dim = lesion_feature_dim
@@ -541,30 +580,42 @@ class RadiologyLesionAttentionAggregator(nn.Module):
         relevant_lesion_features = lesion_x[batch_local_lesion_indices]
         relevant_lesion_features = self.lesion_norm(relevant_lesion_features)
 
-        # 1. Compute patient context via mean pooling of their lesions
-        patient_context = scatter_mean(
-            relevant_lesion_features, batch_local_patient_indices,
-            dim=0, dim_size=num_patients_in_batch
-        )  # [num_patients_in_batch, lesion_feature_dim]
-        patient_context_proj = self.context_proj(patient_context)
-        context_per_lesion = patient_context_proj[batch_local_patient_indices]
+        if self.pooling == "attention":
+            # Context-aware attention aggregation (default).
+            patient_context = scatter_mean(
+                relevant_lesion_features, batch_local_patient_indices,
+                dim=0, dim_size=num_patients_in_batch
+            )  # [num_patients_in_batch, lesion_feature_dim]
+            patient_context_proj = self.context_proj(patient_context)
+            context_per_lesion = patient_context_proj[batch_local_patient_indices]
 
-        # 2. Calculate context-aware attention scores for each lesion
-        attn_input = torch.cat([relevant_lesion_features, context_per_lesion], dim=-1)
-        attn_scores = self.attention_mlp(attn_input)  # [num_batch_edges, 1]
-
-        # 3. Per-patient softmax over lesion attention scores (numerically stable internally)
-        alpha = scatter_softmax(
-            attn_scores.squeeze(-1), batch_local_patient_indices, dim=0
-        ).unsqueeze(-1)  # [num_batch_edges, 1]
-
-        # 4. Calculate weighted sum of lesion features for each patient
-        weighted_lesion_features = relevant_lesion_features * alpha
-
-        # Aggregate weighted features per patient
-        aggregated_patient_features = scatter_add(
-            weighted_lesion_features, batch_local_patient_indices, dim=0, dim_size=num_patients_in_batch
-        )  # [num_patients_in_batch, lesion_feature_dim]
+            attn_input = torch.cat([relevant_lesion_features, context_per_lesion], dim=-1)
+            attn_scores = self.attention_mlp(attn_input)  # [num_batch_edges, 1]
+            alpha = scatter_softmax(
+                attn_scores.squeeze(-1), batch_local_patient_indices, dim=0
+            ).unsqueeze(-1)  # [num_batch_edges, 1]
+            weighted_lesion_features = relevant_lesion_features * alpha
+            aggregated_patient_features = scatter_add(
+                weighted_lesion_features, batch_local_patient_indices, dim=0, dim_size=num_patients_in_batch
+            )  # [num_patients_in_batch, lesion_feature_dim]
+        elif self.pooling == "mean":
+            aggregated_patient_features = scatter_mean(
+                relevant_lesion_features, batch_local_patient_indices,
+                dim=0, dim_size=num_patients_in_batch
+            )
+        else:  # max
+            aggregated_patient_features, _ = scatter_max(
+                relevant_lesion_features, batch_local_patient_indices,
+                dim=0, dim_size=num_patients_in_batch
+            )
+            # scatter_max fills patients with no lesions with the dtype minimum;
+            # zero those rows so absent-lesion patients match mean/attention.
+            present = torch.zeros(num_patients_in_batch, 1, dtype=torch.bool,
+                                  device=relevant_lesion_features.device)
+            present[batch_local_patient_indices] = True
+            aggregated_patient_features = torch.where(
+                present, aggregated_patient_features,
+                torch.zeros_like(aggregated_patient_features))
 
         # 5. Optional output projection and normalization
         projected_features = self.output_projection(aggregated_patient_features)
@@ -650,7 +701,8 @@ class StandaloneRadiologyMIL(nn.Module):
             lesion_feature_dim=agg_config['lesion_feature_dim'],
             patient_embed_dim=agg_config['aggregated_output_dim'],
             attention_hidden_dim=agg_config.get('attention_hidden_dim'),
-            dropout=agg_config.get('dropout', 0.5)
+            dropout=agg_config.get('dropout', 0.5),
+            pooling=agg_config.get('pooling', 'attention'),
         )
         
         # Simple linear classifier head

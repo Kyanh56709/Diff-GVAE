@@ -81,6 +81,8 @@ These flags were added in the gvae-lesion-agg-fixes branch. All default to curre
 |------|------|---------|-------------|
 | `logvar_clamp` | `Tuple[float,float] \| None` | `None` | Clamp encoder logvar to `(min, max)`. Recommended: `(-6.0, 2.0)`. |
 | `radiology_zero_lesion_passthrough` | `bool` | `False` | When True, radiology patients with zero lesions passthrough encoder instead of getting missing embedding. |
+| `view_configs[*].encoder_type` | `str` | `'gat'` | `'gat'` = GATv2 message passing; `'mlp'` = graph-agnostic MLP encoder (no edges) for the C1 no-GNN ablation. |
+| `radiology_aggregator_config.pooling` | `str` | `'attention'` | Lesion aggregation: `'attention'` (context-aware) or `'mean'`/`'max'` (C5 ablation). |
 
 ### train_config flags
 

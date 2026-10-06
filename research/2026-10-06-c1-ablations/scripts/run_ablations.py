@@ -10,8 +10,10 @@ graph, seeds 42-46, so scores are directly comparable to the canonical run and
 to each other (same splits). Paired DeLong tests (with Holm correction across
 arms) compare every arm's fusion head to `full`.
 
-The graph / no-GNN (MLP) and lesion-pooling (attention vs mean/max) arms need
-opt-in model flags and are NOT covered here.
+The no-GNN (MLP encoder) and lesion-pooling (attention vs mean/max) arms use the
+opt-in `view_configs[*].encoder_type` / `radiology_aggregator_config.pooling` flags
+(defaults keep the canonical GAT + attention behaviour). Use `--arms` to run a
+subset of arms; it must include `full` (the DeLong reference).
 
 Usage:
     .venv/bin/python research/2026-10-06-c1-ablations/scripts/run_ablations.py \
@@ -50,7 +52,7 @@ ARM_VIEWS = {
     "clinical_radiology": ("clinical", "radiology"),
     "pathology_radiology": ("pathology", "radiology"),
 }
-ARMS = ["full", "no_contrastive"] + list(ARM_VIEWS)
+ARMS = ["full", "no_contrastive"] + list(ARM_VIEWS) + ["no_gnn", "pooling_mean", "pooling_max"]
 
 
 def base_configs(data):
@@ -101,6 +103,14 @@ def arm_configs(data, arm):
         train_config["annealing"]["cross_cl"] = {
             "start_weight": 0.0, "end_weight": 0.0, "start_epoch": 0, "end_epoch": 0}
         return model_config, train_config
+    if arm == "no_gnn":
+        # Graph-agnostic ablation: MLP encoder (no message passing) for every view.
+        for vcfg in model_config["view_configs"].values():
+            vcfg["encoder_type"] = "mlp"
+        return model_config, train_config
+    if arm in ("pooling_mean", "pooling_max"):
+        model_config["radiology_aggregator_config"]["pooling"] = arm.split("_", 1)[1]
+        return model_config, train_config
     views = ARM_VIEWS[arm]
     model_config["view_configs"] = {v: model_config["view_configs"][v] for v in views}
     if "radiology" not in views:
@@ -125,10 +135,16 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--seeds", type=str, default=None)
     ap.add_argument("--tag", default="ablation")
+    ap.add_argument("--arms", type=str, default=None,
+                    help="comma list of arms to run (default: all); must include 'full'")
     ap.add_argument("--smoke", action="store_true", help="tiny epochs to validate all arms")
     args = ap.parse_args()
 
     seeds = [int(s) for s in args.seeds.split(",")] if args.seeds else [args.seed]
+    arms = ARMS if not args.arms else [a.strip() for a in args.arms.split(",")]
+    unknown = set(arms) - set(ARMS)
+    assert not unknown, f"unknown arm(s): {unknown}"
+    assert "full" in arms, "'full' must be included: it is the DeLong reference"
     data = torch.load(ROOT / args.data, weights_only=False)
     assert data["lesion"].x.shape[1] == 32, f"expected r32 graph, got {data['lesion'].x.shape[1]}"
     y = data["patient"]["binary_label"].numpy().astype(int)
@@ -137,7 +153,7 @@ def main():
     out_root.mkdir(parents=True, exist_ok=True)
 
     scores = {}  # (arm, seed) -> head OOF probs
-    for arm in ARMS:
+    for arm in arms:
         model_config, train_config = arm_configs(data, arm)
         if args.smoke:
             train_config["epochs"] = 4
@@ -161,7 +177,7 @@ def main():
 
     # Per-(arm,seed) metrics with bootstrap CIs.
     rows = []
-    for arm in ARMS:
+    for arm in arms:
         for seed in seeds:
             s = scores[(arm, seed)]
             auc = bootstrap_ci(y, s, roc_auc_score, n_boot=2000, seed=4200)
@@ -175,7 +191,7 @@ def main():
     tests = []
     for seed in list(seeds) + ["seed_mean"]:
         res = []
-        for arm in ARMS:
+        for arm in arms:
             if arm == "full":
                 continue
             if seed == "seed_mean":
@@ -191,7 +207,7 @@ def main():
     tests_df = pd.DataFrame(tests)
 
     summary_rows = []
-    for arm in ARMS:
+    for arm in arms:
         m = metrics[metrics.arm == arm]
         row = {"arm": arm,
                "roc_auc_mean": m.roc_auc.mean(), "roc_auc_sd": m.roc_auc.std(ddof=1),
@@ -213,7 +229,7 @@ def main():
     metrics.to_csv(out_root / "metrics_per_seed.csv", index=False)
     tests_df.to_csv(out_root / "delong_tests.csv", index=False)
     summary.to_csv(out_root / "summary.csv", index=False)
-    json.dump({"data": args.data, "arms": ARMS, "seeds": seeds},
+    json.dump({"data": args.data, "arms": arms, "seeds": seeds},
               open(out_root / "run_meta.json", "w"), indent=2)
     with pd.option_context("display.width", 220, "display.max_columns", 20):
         print("\n" + summary.round(4).to_string(index=False))
