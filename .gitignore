@@ -82,6 +82,8 @@ image.png
 # (regenerate with the run_oof.py / pipeline_phase4a_oof.sh scripts) and
 # third-party downloads from the external-dataset search (sources listed in raw/README.md).
 research/**/oof_arrays.npz
+# Per-patient arrays of any name stay local (repo is public).
+research/**/*.npz
 research/2026-08-06-external-datasets/sources/raw/*
 !research/2026-08-06-external-datasets/sources/raw/README.md
 

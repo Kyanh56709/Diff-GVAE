@@ -582,18 +582,9 @@ class RadiologyLesionAttentionAggregator(nn.Module):
 
         if self.pooling == "attention":
             # Context-aware attention aggregation (default).
-            patient_context = scatter_mean(
+            alpha = self._attention_alpha(
                 relevant_lesion_features, batch_local_patient_indices,
-                dim=0, dim_size=num_patients_in_batch
-            )  # [num_patients_in_batch, lesion_feature_dim]
-            patient_context_proj = self.context_proj(patient_context)
-            context_per_lesion = patient_context_proj[batch_local_patient_indices]
-
-            attn_input = torch.cat([relevant_lesion_features, context_per_lesion], dim=-1)
-            attn_scores = self.attention_mlp(attn_input)  # [num_batch_edges, 1]
-            alpha = scatter_softmax(
-                attn_scores.squeeze(-1), batch_local_patient_indices, dim=0
-            ).unsqueeze(-1)  # [num_batch_edges, 1]
+                num_patients_in_batch).unsqueeze(-1)  # [num_batch_edges, 1]
             weighted_lesion_features = relevant_lesion_features * alpha
             aggregated_patient_features = scatter_add(
                 weighted_lesion_features, batch_local_patient_indices, dim=0, dim_size=num_patients_in_batch
@@ -623,6 +614,35 @@ class RadiologyLesionAttentionAggregator(nn.Module):
         normalized_features = self.norm_layer(projected_features)
 
         return normalized_features
+
+    def _attention_alpha(self, relevant_lesion_features, batch_local_patient_indices,
+                         num_patients_in_batch) -> torch.Tensor:
+        """Per-edge attention weights (softmax over each patient's lesions)."""
+        patient_context = scatter_mean(
+            relevant_lesion_features, batch_local_patient_indices,
+            dim=0, dim_size=num_patients_in_batch)
+        patient_context_proj = self.context_proj(patient_context)
+        context_per_lesion = patient_context_proj[batch_local_patient_indices]
+        attn_input = torch.cat([relevant_lesion_features, context_per_lesion], dim=-1)
+        attn_scores = self.attention_mlp(attn_input)  # [num_batch_edges, 1]
+        return scatter_softmax(
+            attn_scores.squeeze(-1), batch_local_patient_indices, dim=0)
+
+    @torch.no_grad()
+    def attention_weights(self, lesion_x: torch.Tensor, patient_to_lesion_edge_index: torch.Tensor,
+                          num_patients_in_batch: int) -> torch.Tensor:
+        """Return per-edge attention weights [num_edges] for interpretability (F2).
+
+        Edge order matches `patient_to_lesion_edge_index` (and hence the rows of the
+        lesion features it indexes). Only defined for pooling='attention'.
+        """
+        if self.pooling != "attention":
+            raise RuntimeError("attention_weights is only defined for pooling='attention'.")
+        if lesion_x.numel() == 0 or patient_to_lesion_edge_index.numel() == 0:
+            return torch.zeros(0, device=lesion_x.device, dtype=lesion_x.dtype)
+        relevant = self.lesion_norm(lesion_x[patient_to_lesion_edge_index[1]])
+        return self._attention_alpha(relevant, patient_to_lesion_edge_index[0],
+                                     num_patients_in_batch)
 
 
 class MuFusionTransformer(nn.Module):

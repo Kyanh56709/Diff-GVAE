@@ -60,9 +60,9 @@ Legend: `[ ]` todo · **(BLOCKING)** = nothing downstream is credible until done
 
 ## F. Interpretability (expected at methods Q1)
 
-- [ ] **F1.** Feature attribution on the fusion/classifier (SHAP or Integrated Gradients).
-- [ ] **F2.** Visualize/analyze **lesion attention weights** — show the aggregator attends to plausible lesions.
-- [ ] **F3.** Latent-space visualization (UMAP/t-SNE colored by response and by driver-gene status) to support the "biologically meaningful latent" claim.
+- [x] **F1.** Feature attribution on the fusion/classifier (SHAP or Integrated Gradients). — **Done 2026-10-06:** Integrated Gradients (torch, no new deps) of the fusion logit w.r.t. each view's mu; `mean|IG|` ≈ equal across views (clinical 0.0215, pathology 0.0242, radiology 0.0226) — no view dominates, consistent with C1/C2. Evidence: `research/2026-10-06-f-interpretability/reports/f_interpretability_report.md`.
+- [x] **F2.** Visualize/analyze **lesion attention weights** — show the aggregator attends to plausible lesions. — **Done 2026-10-06 (partial honesty):** per-lesion attention from `RadiologyLesionAttentionAggregator.attention_weights(...)` over 187 radiology patients — only **mildly** peaked (mean max weight 0.778, entropy 0.417 vs 0.461 uniform). No lesion-level ground truth exists, so "plausible lesion" cannot be validated — reported as a limitation, not a strength. Evidence: same report §F2.
+- [x] **F3.** Latent-space visualization (UMAP/t-SNE colored by response and by driver-gene status) to support the "biologically meaningful latent" claim. — **Done 2026-10-06:** PCA + t-SNE on leakage-free OOF `concat_mu` (5 canonical fold checkpoints), colored by response and by each driver gene (PNG in `research/2026-10-06-f-interpretability/output/`). Quantitative probe (5-fold CV): response 0.645 (matches canonical probe); genes 0.60–0.73 — but gene flags are **inputs** to the clinical view, so this reflects reconstruction, not spontaneous gene encoding (caveat, cf. `Loan_agents.md` L12). Evidence: same report §F3.
 
 ## G. Reporting standards & compliance
 

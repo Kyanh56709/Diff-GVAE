@@ -82,6 +82,24 @@ def test_invalid_pooling_raises():
         RadiologyLesionAttentionAggregator(15, 32, pooling="median")
 
 
+def test_attention_weights_normalize_per_patient():
+    torch.manual_seed(0)
+    agg = RadiologyLesionAttentionAggregator(15, 32, attention_hidden_dim=32,
+                                             dropout=0.0).eval()
+    lesion_x = torch.randn(7, 15)
+    edge = torch.tensor([[0, 0, 0, 1, 2, 2, 2], [0, 1, 2, 3, 4, 5, 6]])
+    alpha = agg.attention_weights(lesion_x, edge, 3)
+    assert alpha.shape == (7,) and torch.isfinite(alpha).all()
+    for p in range(3):
+        assert abs(float(alpha[edge[0] == p].sum()) - 1.0) < 1e-5
+
+
+def test_attention_weights_requires_attention_pooling():
+    agg = RadiologyLesionAttentionAggregator(15, 32, pooling="mean")
+    with pytest.raises(RuntimeError):
+        agg.attention_weights(torch.randn(1, 15), torch.tensor([[0], [0]]), 1)
+
+
 # --- GVAE end-to-end with both flags ------------------------------------------------
 
 def _set_all_encoders(model_config, encoder_type):
